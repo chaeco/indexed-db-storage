@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日志存储示例</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 900px;
+      margin: 50px auto;
+      padding: 0 20px;
+    }
+    h1 { color: #333; }
+    .controls {
+      margin: 20px 0;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+    button {
+      padding: 8px 16px;
+      margin: 5px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .btn-primary { background: #007bff; color: white; }
+    .btn-success { background: #28a745; color: white; }
+    .btn-danger { background: #dc3545; color: white; }
+    .btn-secondary { background: #6c757d; color: white; }
+    button:hover { opacity: 0.9; }
+    .log-container {
+      margin: 20px 0;
+      max-height: 500px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    .log-item {
+      padding: 12px 15px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .log-item:last-child { border-bottom: none; }
+    .log-level {
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+      font-weight: bold;
+      min-width: 60px;
+      text-align: center;
+    }
+    .level-error { background: #fee; color: #c00; }
+    .level-warn { background: #ffc; color: #860; }
+    .level-info { background: #e7f3ff; color: #0066cc; }
+    .level-debug { background: #f0f0f0; color: #666; }
+    .log-content {
+      flex: 1;
+    }
+    .log-time {
+      font-size: 12px;
+      color: #999;
+    }
+    .stats {
+      display: flex;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .stat-card {
+      flex: 1;
+      padding: 15px;
+      background: white;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      text-align: center;
+    }
+    .stat-value {
+      font-size: 32px;
+      font-weight: bold;
+      color: #007bff;
+    }
+    .stat-label {
+      font-size: 14px;
+      color: #666;
+      margin-top: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>📝 日志存储示例</h1>
+
+  <div class="controls">
+    <button class="btn-primary" onclick="initLogger()">初始化日志系统</button>
+    <button class="btn-success" onclick="generateLogs()">生成测试日志</button>
+    <button class="btn-secondary" onclick="refreshLogs()">刷新显示</button>
+    <button class="btn-danger" onclick="clearLogs()">清空日志</button>
+  </div>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-value" id="total-count">0</div>
+      <div class="stat-label">总日志数</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="error-count">0</div>
+      <div class="stat-label">错误日志</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-value" id="warn-count">0</div>
+      <div class="stat-label">警告日志</div>
+    </div>
+  </div>
+
+  <div class="log-container" id="log-container">
+    <div style="padding: 40px; text-align: center; color: #999;">
+      暂无日志，请先初始化日志系统
+    </div>
+  </div>
+
+  <script type="module">
+    import { IndexedDBStorage } from '../dist/index.js'
+
+    let logStorage
+
+    // 日志级别配置
+    const LOG_LEVELS = {
+      ERROR: 'error',
+      WARN: 'warn',
+      INFO: 'info',
+      DEBUG: 'debug',
+    }
+
+    // 初始化日志系统
+    window.initLogger = async function() {
+      try {
+        logStorage = new IndexedDBStorage(
+          {
+            dbName: 'app-logs-db',
+            storeName: 'logs',
+            maxRecords: 100, // 最多保留100条日志
+            cleanupInterval: 10000, // 10秒清理一次
+          },
+          {
+            storeName: 'logs',
+            keyPath: 'id',
+            autoIncrement: true,
+            indexes: [
+              { name: 'level', keyPath: 'level' },
+              { name: 'timestamp', keyPath: 'timestamp' },
+            ],
+          }
+        )
+        await logStorage.init()
+        alert('✅ 日志系统初始化成功')
+        await refreshLogs()
+      } catch (err) {
+        alert('❌ 初始化失败: ' + err.message)
+      }
+    }
+
+    // 添加日志
+    async function addLog(level, message) {
+      if (!logStorage) {
+        alert('⚠️ 请先初始化日志系统')
+        return
+      }
+      await logStorage.save({
+        level,
+        message,
+        timestamp: Date.now(),
+      })
+    }
+
+    // 生成测试日志
+    window.generateLogs = async function() {
+      if (!logStorage) {
+        alert('⚠️ 请先初始化日志系统')
+        return
+      }
+      
+      const testLogs = [
+        { level: LOG_LEVELS.INFO, message: '应用启动成功' },
+        { level: LOG_LEVELS.DEBUG, message: '加载配置文件' },
+        { level: LOG_LEVELS.INFO, message: '连接到服务器' },
+        { level: LOG_LEVELS.WARN, message: '网络延迟较高' },
+        { level: LOG_LEVELS.ERROR, message: 'API 请求失败: 超时' },
+        { level: LOG_LEVELS.INFO, message: '重试请求...' },
+        { level: LOG_LEVELS.INFO, message: '请求成功' },
+        { level: LOG_LEVELS.DEBUG, message: '缓存数据已更新' },
+      ]
+
+      for (const log of testLogs) {
+        await addLog(log.level, log.message)
+        await new Promise(resolve => setTimeout(resolve, 100)) // 模拟时间间隔
+      }
+
+      await refreshLogs()
+    }
+
+    // 刷新日志显示
+    window.refreshLogs = async function() {
+      if (!logStorage) {
+        return
+      }
+
+      try {
+        const logs = await logStorage.query()
+        const container = document.getElementById('log-container')
+
+        if (logs.length === 0) {
+          container.innerHTML = '<div style="padding: 40px; text-align: center; color: #999;">暂无日志</div>'
+          updateStats(logs)
+          return
+        }
+
+        // 按时间倒序排列
+        logs.sort((a, b) => b.timestamp - a.timestamp)
+
+        container.innerHTML = logs.map(log => {
+          const time = new Date(log.timestamp).toLocaleString()
+          return `
+            <div class="log-item">
+              <div class="log-level level-${log.level}">${log.level.toUpperCase()}</div>
+              <div class="log-content">
+                <div>${log.message}</div>
+                <div class="log-time">${time}</div>
+              </div>
+            </div>
+          `
+        }).join('')
+
+        updateStats(logs)
+      } catch (err) {
+        alert('❌ 刷新失败: ' + err.message)
+      }
+    }
+
+    // 更新统计信息
+    function updateStats(logs) {
+      document.getElementById('total-count').textContent = logs.length
+      document.getElementById('error-count').textContent = logs.filter(l => l.level === 'error').length
+      document.getElementById('warn-count').textContent = logs.filter(l => l.level === 'warn').length
+    }
+
+    // 清空日志
+    window.clearLogs = async function() {
+      if (!logStorage) {
+        alert('⚠️ 请先初始化日志系统')
+        return
+      }
+      
+      if (confirm('确定要清空所有日志吗？')) {
+        await logStorage.clear()
+        await refreshLogs()
+        alert('✅ 日志已清空')
+      }
+    }
+  </script>
+</body>
+</html>

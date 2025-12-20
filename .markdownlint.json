@@ -1,0 +1,8 @@
+{
+  "default": true,
+  "MD024": false,
+  "MD034": false,
+  "MD060": {
+    "style": "single_pipe"
+  }
+}

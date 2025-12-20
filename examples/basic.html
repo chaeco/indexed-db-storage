@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IndexedDB Storage 基础示例</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 0 20px;
+    }
+    h1 { color: #333; }
+    .section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      border: none;
+      border-radius: 4px;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover { background: #0056b3; }
+    .output {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>IndexedDB Storage 基础示例</h1>
+
+  <div class="section">
+    <h2>基础 CRUD 操作</h2>
+    <button onclick="initStorage()">初始化存储</button>
+    <button onclick="saveData()">保存数据</button>
+    <button onclick="queryData()">查询数据</button>
+    <button onclick="clearData()">清空数据</button>
+    <div class="output" id="crud-output"></div>
+  </div>
+
+  <div class="section">
+    <h2>自动清理功能</h2>
+    <button onclick="initWithCleanup()">初始化（带清理）</button>
+    <button onclick="addManyRecords()">批量添加记录</button>
+    <button onclick="checkRecordCount()">检查记录数</button>
+    <div class="output" id="cleanup-output"></div>
+  </div>
+
+  <script type="module">
+    import { IndexedDBStorage } from '../dist/index.js'
+
+    let basicStorage
+    let cleanupStorage
+
+    // 工具函数：显示输出
+    function output(elementId, message) {
+      const el = document.getElementById(elementId)
+      const time = new Date().toLocaleTimeString()
+      el.innerHTML += `<pre>[${time}] ${message}</pre>`
+      el.scrollTop = el.scrollHeight
+    }
+
+    // 基础操作示例
+    window.initStorage = async function() {
+      try {
+        basicStorage = new IndexedDBStorage(
+          {
+            dbName: 'example-basic-db',
+            storeName: 'users',
+          },
+          {
+            storeName: 'users',
+            keyPath: 'id',
+            autoIncrement: true,
+          }
+        )
+        await basicStorage.init()
+        output('crud-output', '✅ 存储初始化成功')
+      } catch (err) {
+        output('crud-output', '❌ 初始化失败: ' + err.message)
+      }
+    }
+
+    window.saveData = async function() {
+      if (!basicStorage) {
+        output('crud-output', '⚠️ 请先初始化存储')
+        return
+      }
+      try {
+        const users = [
+          { name: '张三', age: 25, email: 'zhangsan@example.com' },
+          { name: '李四', age: 30, email: 'lisi@example.com' },
+          { name: '王五', age: 28, email: 'wangwu@example.com' },
+        ]
+        for (const user of users) {
+          await basicStorage.save(user)
+        }
+        output('crud-output', `✅ 已保存 ${users.length} 条用户数据`)
+      } catch (err) {
+        output('crud-output', '❌ 保存失败: ' + err.message)
+      }
+    }
+
+    window.queryData = async function() {
+      if (!basicStorage) {
+        output('crud-output', '⚠️ 请先初始化存储')
+        return
+      }
+      try {
+        const users = await basicStorage.query()
+        output('crud-output', `📋 查询结果 (${users.length} 条):\n${JSON.stringify(users, null, 2)}`)
+      } catch (err) {
+        output('crud-output', '❌ 查询失败: ' + err.message)
+      }
+    }
+
+    window.clearData = async function() {
+      if (!basicStorage) {
+        output('crud-output', '⚠️ 请先初始化存储')
+        return
+      }
+      try {
+        await basicStorage.clear()
+        output('crud-output', '✅ 已清空所有数据')
+      } catch (err) {
+        output('crud-output', '❌ 清空失败: ' + err.message)
+      }
+    }
+
+    // 清理功能示例
+    window.initWithCleanup = async function() {
+      try {
+        cleanupStorage = new IndexedDBStorage(
+          {
+            dbName: 'example-cleanup-db',
+            storeName: 'logs',
+            maxRecords: 10,
+            cleanupInterval: 5000, // 5秒清理一次
+          },
+          {
+            storeName: 'logs',
+            keyPath: 'id',
+            autoIncrement: true,
+          }
+        )
+        await cleanupStorage.init()
+        output('cleanup-output', '✅ 带清理功能的存储初始化成功（最多保留10条记录）')
+      } catch (err) {
+        output('cleanup-output', '❌ 初始化失败: ' + err.message)
+      }
+    }
+
+    window.addManyRecords = async function() {
+      if (!cleanupStorage) {
+        output('cleanup-output', '⚠️ 请先初始化存储')
+        return
+      }
+      try {
+        const count = 20
+        for (let i = 0; i < count; i++) {
+          await cleanupStorage.save({
+            message: `日志消息 #${i + 1}`,
+            timestamp: Date.now(),
+          })
+        }
+        output('cleanup-output', `✅ 已添加 ${count} 条记录`)
+        output('cleanup-output', '💡 等待自动清理（每5秒触发一次）...')
+      } catch (err) {
+        output('cleanup-output', '❌ 添加失败: ' + err.message)
+      }
+    }
+
+    window.checkRecordCount = async function() {
+      if (!cleanupStorage) {
+        output('cleanup-output', '⚠️ 请先初始化存储')
+        return
+      }
+      try {
+        const count = await cleanupStorage.count()
+        output('cleanup-output', `📊 当前记录数: ${count}`)
+      } catch (err) {
+        output('cleanup-output', '❌ 检查失败: ' + err.message)
+      }
+    }
+  </script>
+</body>
+</html>

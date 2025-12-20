@@ -391,4 +391,4 @@ npm run format
 
 ```
 
-MIT © [chaeco](https://github.com/chaeco)License
+MIT © [chaeco](https://github.com/chaeco)

@@ -26,8 +26,10 @@
 ## 安装
 
 ```bash
-npm install @chaeco/indexed-db-storage
+npm install git+ssh://git@github.com:chaeco/indexed-db-storage.git
 
+# 或者使用 HTTPS
+npm install https://github.com/chaeco/indexed-db-storage.git
 ```
 
 ## 快速开始
@@ -390,5 +392,3 @@ npm run format
 ```
 
 MIT © [chaeco](https://github.com/chaeco)License
-
-ISC

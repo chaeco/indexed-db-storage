@@ -9,7 +9,9 @@
 
 - 🎯 **通用存储** - 支持任意数据类型，不限于特定场景
 
-- 🔒 **类型安全** - 完整的 TypeScript 泛型支持
+- � **强大查询** - 支持 where 条件、多字段排序、自定义过滤等高级查询
+
+- �🔒 **类型安全** - 完整的 TypeScript 泛型支持
 
 - 🔄 **单例模式** - 基于 `dbName:storeName` 自动管理实例
 
@@ -170,6 +172,90 @@ const expensiveProducts = await storage.query({
 
 ```
 
+### 高级查询（where 条件）
+
+```typescript
+// 1. 等值查询
+const results = await storage.query({
+  where: { field: 'age', operator: 'eq', value: 25 }
+})
+
+// 2. 范围查询
+const results = await storage.query({
+  where: { field: 'age', operator: 'gt', value: 30 } // > 30
+})
+
+const results = await storage.query({
+  where: { field: 'age', operator: 'between', value: [25, 35] } // 25-35之间
+})
+
+// 3. 字符串查询
+const results = await storage.query({
+  where: { field: 'name', operator: 'contains', value: '李' } // 包含"李"
+})
+
+const results = await storage.query({
+  where: { field: 'name', operator: 'startsWith', value: '张' } // 以"张"开头
+})
+
+// 4. 数组查询
+const results = await storage.query({
+  where: { field: 'department', operator: 'in', value: ['工程', '产品'] }
+})
+
+// 5. 多条件查询（AND）
+const results = await storage.query({
+  where: [
+    { field: 'age', operator: 'gt', value: 25 },
+    { field: 'department', operator: 'eq', value: '工程' }
+  ]
+})
+
+// 6. 排序
+const results = await storage.query({
+  sort: { field: 'age', order: 'asc' } // 按年龄升序
+})
+
+// 多字段排序
+const results = await storage.query({
+  sort: [
+    { field: 'department', order: 'asc' },
+    { field: 'age', order: 'desc' }
+  ]
+})
+
+// 7. 自定义过滤函数
+const results = await storage.query({
+  filter: (item) => item.age % 2 === 0 && item.salary > 8000
+})
+
+// 8. 组合查询
+const results = await storage.query({
+  where: { field: 'age', operator: 'gte', value: 25 },
+  sort: { field: 'salary', order: 'desc' },
+  filter: (item) => item.isActive,
+  limit: 10,
+  offset: 0
+})
+
+```
+
+**支持的查询操作符：**
+
+- `eq` - 等于
+- `ne` - 不等于
+- `gt` - 大于
+- `gte` - 大于等于
+- `lt` - 小于
+- `lte` - 小于等于
+- `between` - 在范围内（需要提供 [min, max] 数组）
+- `in` - 在数组中
+- `contains` - 包含（字符串）
+- `startsWith` - 开头匹配（字符串）
+- `endsWith` - 结尾匹配（字符串）
+
+```
+
 ### 实例复用
 
 ```typescript
@@ -273,6 +359,28 @@ new IndexedDBStorage<T>(options: StorageOptions, storeConfig?: StoreConfig)
 - `range` (IDBKeyRange) - 查询范围
 
 - `direction` (IDBCursorDirection) - 排序方向
+
+- `where` (WhereCondition | WhereCondition[]) - 查询条件（支持多条件）
+
+- `sort` (SortOption | SortOption[]) - 排序选项（支持多字段排序）
+
+- `filter` ((item: T) => boolean) - 自定义过滤函数
+
+- `includeTotal` (boolean) - 是否返回总数
+
+**WhereCondition:**
+
+- `field` (string) - 字段名（支持嵌套字段如 `user.address.city`）
+
+- `operator` (QueryOperator) - 操作符（eq、ne、gt、gte、lt、lte、between、in、contains、startsWith、endsWith）
+
+- `value` (unknown) - 比较值
+
+**SortOption:**
+
+- `field` (string) - 排序字段名
+
+- `order` ('asc' | 'desc') - 排序方向
 
 #### `async get(key: IDBValidKey): Promise<T | undefined>`
 

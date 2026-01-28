@@ -35,6 +35,8 @@ npx serve .
 
 - 日志示例: [http://localhost:8000/examples/logger.html](http://localhost:8000/examples/logger.html)
 
+- 高级查询示例: [http://localhost:8000/examples/advanced-query.html](http://localhost:8000/examples/advanced-query.html)
+
 ### 方法 2：使用开发服务器
 
 如果你有 Vite 或其他开发服务器，也可以直接运行。
@@ -66,6 +68,25 @@ npx serve .
 - 统计信息
 
 - 自动清理旧日志
+
+### advanced-query.html - 高级查询功能
+
+演示强大的查询功能：
+
+- **条件查询（where）**：等值、范围、字符串匹配等
+  - 等值查询：`eq`, `ne`
+  - 范围查询：`gt`, `gte`, `lt`, `lte`, `between`
+  - 字符串查询：`contains`, `startsWith`, `endsWith`
+  - 数组查询：`in`
+  - 多条件查询（AND）
+
+- **排序功能（sort）**：单字段和多字段排序
+
+- **自定义过滤（filter）**：使用函数进行复杂条件过滤
+
+- **组合查询**：where + sort + filter + limit + offset
+
+- **分页查询**：完整的分页实现
 
 ## 注意事项
 

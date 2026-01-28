@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>高级查询示例 - IndexedDB Storage</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 20px;
+        background: #f5f5f5;
+      }
+      .container {
+        background: white;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        margin-bottom: 20px;
+      }
+      h1 {
+        color: #333;
+      }
+      h2 {
+        color: #666;
+        border-bottom: 2px solid #4caf50;
+        padding-bottom: 10px;
+      }
+      button {
+        background: #4caf50;
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        margin: 5px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+      button:hover {
+        background: #45a049;
+      }
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+      }
+      .result {
+        background: #f9f9f9;
+        padding: 15px;
+        border-radius: 4px;
+        margin-top: 10px;
+        font-family: monospace;
+        white-space: pre-wrap;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+      .input-group {
+        margin: 10px 0;
+      }
+      input,
+      select {
+        padding: 8px;
+        margin: 5px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+      }
+      .error {
+        color: #f44336;
+        background: #ffebee;
+        padding: 10px;
+        border-radius: 4px;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>📊 IndexedDB Storage - 高级查询示例</h1>
+
+    <div class="container">
+      <h2>1. 初始化数据</h2>
+      <button id="initData">初始化测试数据</button>
+      <button id="clearData">清空数据</button>
+      <div id="initResult" class="result"></div>
+    </div>
+
+    <div class="container">
+      <h2>2. 条件查询 (where)</h2>
+
+      <h3>等值查询</h3>
+      <button id="queryEq">查询年龄 = 25</button>
+      <button id="queryIn">查询部门 in [工程, 产品]</button>
+
+      <h3>范围查询</h3>
+      <button id="queryGt">查询年龄 > 30</button>
+      <button id="queryBetween">查询年龄在 25-35 之间</button>
+
+      <h3>字符串查询</h3>
+      <button id="queryContains">名字包含 "李"</button>
+      <button id="queryStartsWith">名字以 "张" 开头</button>
+
+      <h3>多条件查询</h3>
+      <button id="queryMulti">年龄 > 25 且 部门 = 工程</button>
+
+      <div id="whereResult" class="result"></div>
+    </div>
+
+    <div class="container">
+      <h2>3. 排序查询 (sort)</h2>
+      <button id="sortByAge">按年龄升序</button>
+      <button id="sortByAgeDesc">按年龄降序</button>
+      <button id="sortMulti">按部门升序，年龄降序</button>
+      <div id="sortResult" class="result"></div>
+    </div>
+
+    <div class="container">
+      <h2>4. 自定义过滤 (filter)</h2>
+      <button id="filterCustom">自定义复杂条件（年龄是偶数且工资>8000）</button>
+      <div id="filterResult" class="result"></div>
+    </div>
+
+    <div class="container">
+      <h2>5. 组合查询</h2>
+      <button id="complexQuery">复杂组合查询</button>
+      <div id="complexResult" class="result"></div>
+    </div>
+
+    <div class="container">
+      <h2>6. 分页查询</h2>
+      <div class="input-group">
+        <label>页码：</label>
+        <input type="number" id="pageNum" value="1" min="1" />
+        <label>每页：</label>
+        <input type="number" id="pageSize" value="3" min="1" />
+        <button id="queryPage">查询</button>
+      </div>
+      <div id="pageResult" class="result"></div>
+    </div>
+
+    <script type="module">
+      // 注意：实际使用时应该 import from '@chaeco/indexed-db-storage'
+      import { IndexedDBStorage } from '../dist/index.js'
+
+      let storage
+
+      // 初始化 storage
+      async function initStorage() {
+        storage = new IndexedDBStorage({
+          dbName: 'advanced-query-demo',
+          storeName: 'employees',
+          maxRecords: 100,
+        })
+
+        await storage.init()
+        log('initResult', '✅ Storage 初始化成功')
+      }
+
+      // 日志输出
+      function log(elementId, message, data = null) {
+        const element = document.getElementById(elementId)
+        if (data) {
+          element.textContent = `${message}\n${JSON.stringify(data, null, 2)}`
+        } else {
+          element.textContent = message
+        }
+      }
+
+      // 初始化测试数据
+      async function initTestData() {
+        try {
+          await storage.clear()
+
+          const employees = [
+            { id: 1, name: '张三', age: 25, department: '工程', salary: 8000 },
+            { id: 2, name: '李四', age: 30, department: '产品', salary: 9000 },
+            { id: 3, name: '王五', age: 28, department: '工程', salary: 8500 },
+            { id: 4, name: '赵六', age: 35, department: '设计', salary: 10000 },
+            { id: 5, name: '钱七', age: 22, department: '工程', salary: 7000 },
+            { id: 6, name: '孙八', age: 32, department: '产品', salary: 9500 },
+            { id: 7, name: '周九', age: 27, department: '市场', salary: 7500 },
+            { id: 8, name: '吴十', age: 29, department: '工程', salary: 8800 },
+            { id: 9, name: '郑十一', age: 33, department: '设计', salary: 11000 },
+            { id: 10, name: '李小明', age: 26, department: '产品', salary: 8200 },
+          ]
+
+          for (const emp of employees) {
+            await storage.save(emp)
+          }
+
+          const count = await storage.count()
+          log('initResult', `✅ 成功初始化 ${count} 条测试数据`, employees)
+        } catch (error) {
+          log('initResult', `❌ 初始化失败: ${error.message}`)
+        }
+      }
+
+      // 等值查询
+      async function queryEqual() {
+        try {
+          const results = await storage.query({
+            where: { field: 'age', operator: 'eq', value: 25 },
+          })
+          log('whereResult', `✅ 找到 ${results.length} 条记录（年龄 = 25）`, results)
+        } catch (error) {
+          log('whereResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // In 查询
+      async function queryIn() {
+        try {
+          const results = await storage.query({
+            where: { field: 'department', operator: 'in', value: ['工程', '产品'] },
+          })
+          log('whereResult', `✅ 找到 ${results.length} 条记录（部门 in [工程, 产品]）`, results)
+        } catch (error) {
+          log('whereResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // 大于查询
+      async function queryGreaterThan() {
+        try {
+          const results = await storage.query({
+            where: { field: 'age', operator: 'gt', value: 30 },
+          })
+          log('whereResult', `✅ 找到 ${results.length} 条记录（年龄 > 30）`, results)
+        } catch (error) {
+          log('whereResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // Between 查询
+      async function queryBetween() {
+        try {
+          const results = await storage.query({
+            where: { field: 'age', operator: 'between', value: [25, 35] },
+          })
+          log('whereResult', `✅ 找到 ${results.length} 条记录（年龄在 25-35 之间）`, results)
+        } catch (error) {
+          log('whereResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // Contains 查询
+      async function queryContains() {
+        try {
+          const results = await storage.query({
+            where: { field: 'name', operator: 'contains', value: '李' },
+          })
+          log('whereResult', `✅ 找到 ${results.length} 条记录（名字包含 "李"）`, results)
+        } catch (error) {
+          log('whereResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // StartsWith 查询
+      async function queryStartsWith() {
+        try {
+          const results = await storage.query({
+            where: { field: 'name', operator: 'startsWith', value: '张' },
+          })
+          log('whereResult', `✅ 找到 ${results.length} 条记录（名字以 "张" 开头）`, results)
+        } catch (error) {
+          log('whereResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // 多条件查询
+      async function queryMultiple() {
+        try {
+          const results = await storage.query({
+            where: [
+              { field: 'age', operator: 'gt', value: 25 },
+              { field: 'department', operator: 'eq', value: '工程' },
+            ],
+          })
+          log('whereResult', `✅ 找到 ${results.length} 条记录（年龄 > 25 且 部门 = 工程）`, results)
+        } catch (error) {
+          log('whereResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // 排序查询
+      async function sortByAge() {
+        try {
+          const results = await storage.query({
+            sort: { field: 'age', order: 'asc' },
+          })
+          log('sortResult', `✅ 按年龄升序排列`, results)
+        } catch (error) {
+          log('sortResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      async function sortByAgeDesc() {
+        try {
+          const results = await storage.query({
+            sort: { field: 'age', order: 'desc' },
+          })
+          log('sortResult', `✅ 按年龄降序排列`, results)
+        } catch (error) {
+          log('sortResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      async function sortMultiple() {
+        try {
+          const results = await storage.query({
+            sort: [
+              { field: 'department', order: 'asc' },
+              { field: 'age', order: 'desc' },
+            ],
+          })
+          log('sortResult', `✅ 按部门升序，年龄降序`, results)
+        } catch (error) {
+          log('sortResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // 自定义过滤
+      async function filterCustom() {
+        try {
+          const results = await storage.query({
+            filter: (item) => item.age % 2 === 0 && item.salary > 8000,
+          })
+          log('filterResult', `✅ 找到 ${results.length} 条记录（年龄是偶数且工资>8000）`, results)
+        } catch (error) {
+          log('filterResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // 复杂组合查询
+      async function complexQuery() {
+        try {
+          const results = await storage.query({
+            where: { field: 'age', operator: 'gte', value: 25 },
+            sort: { field: 'salary', order: 'desc' },
+            limit: 5,
+          })
+          log(
+            'complexResult',
+            `✅ 复杂查询：年龄 >= 25，按工资降序，取前5条`,
+            results
+          )
+        } catch (error) {
+          log('complexResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // 分页查询
+      async function queryPage() {
+        try {
+          const pageNum = parseInt(document.getElementById('pageNum').value) || 1
+          const pageSize = parseInt(document.getElementById('pageSize').value) || 3
+
+          const offset = (pageNum - 1) * pageSize
+
+          const results = await storage.query({
+            sort: { field: 'id', order: 'asc' },
+            offset: offset,
+            limit: pageSize,
+          })
+
+          const total = await storage.count()
+          const totalPages = Math.ceil(total / pageSize)
+
+          log(
+            'pageResult',
+            `✅ 第 ${pageNum}/${totalPages} 页，每页 ${pageSize} 条，共 ${total} 条`,
+            results
+          )
+        } catch (error) {
+          log('pageResult', `❌ 查询失败: ${error.message}`)
+        }
+      }
+
+      // 绑定事件
+      document.getElementById('initData').addEventListener('click', initTestData)
+      document.getElementById('clearData').addEventListener('click', async () => {
+        await storage.clear()
+        log('initResult', '✅ 数据已清空')
+      })
+
+      // where 查询
+      document.getElementById('queryEq').addEventListener('click', queryEqual)
+      document.getElementById('queryIn').addEventListener('click', queryIn)
+      document.getElementById('queryGt').addEventListener('click', queryGreaterThan)
+      document.getElementById('queryBetween').addEventListener('click', queryBetween)
+      document.getElementById('queryContains').addEventListener('click', queryContains)
+      document.getElementById('queryStartsWith').addEventListener('click', queryStartsWith)
+      document.getElementById('queryMulti').addEventListener('click', queryMultiple)
+
+      // 排序查询
+      document.getElementById('sortByAge').addEventListener('click', sortByAge)
+      document.getElementById('sortByAgeDesc').addEventListener('click', sortByAgeDesc)
+      document.getElementById('sortMulti').addEventListener('click', sortMultiple)
+
+      // 自定义过滤
+      document.getElementById('filterCustom').addEventListener('click', filterCustom)
+
+      // 复杂查询
+      document.getElementById('complexQuery').addEventListener('click', complexQuery)
+
+      // 分页查询
+      document.getElementById('queryPage').addEventListener('click', queryPage)
+
+      // 初始化
+      initStorage()
+    </script>
+  </body>
+</html>

@@ -2,7 +2,7 @@
  * 数据操作 - 负责数据的增删查改
  */
 
-import type { QueryOptions } from '../types/index'
+import type { QueryOptions, WhereCondition, QueryOperator } from '../types/index'
 
 /**
  * 保存数据到 IndexedDB
@@ -71,27 +71,162 @@ export async function queryData<T>(
   return new Promise((resolve, reject) => {
     const transaction = db.transaction([storeName], 'readonly')
     const store = transaction.objectStore(storeName)
+    const results: T[] = []
 
-    const source = options.indexName ? store.index(options.indexName) : store
+    // 如果有 where 条件或自定义 filter，使用游标遍历
+    if (options.where || options.filter) {
+      const source = options.indexName ? store.index(options.indexName) : store
+      const request = options.range
+        ? source.openCursor(options.range, options.direction)
+        : source.openCursor(null, options.direction)
 
-    const request = options.range ? source.getAll(options.range) : source.getAll()
+      request.onerror = () => reject(request.error)
 
-    request.onerror = () => {
-      reject(request.error)
-    }
+      request.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue | null>).result
 
-    request.onsuccess = () => {
-      let results = request.result
+        if (cursor) {
+          const item = cursor.value as T
 
-      // 分页处理
-      const offset = options.offset ?? 0
-      const limit = options.limit ?? results.length
+          // 应用 where 条件
+          if (matchesWhereConditions(item, options.where)) {
+            // 应用自定义过滤
+            if (!options.filter || options.filter(item)) {
+              results.push(item)
+            }
+          }
 
-      results = results.slice(offset, offset + limit)
+          cursor.continue()
+        } else {
+          // 游标遍历完成
+          finishQuery(results, options, resolve)
+        }
+      }
+    } else {
+      // 简单查询，使用 getAll
+      const source = options.indexName ? store.index(options.indexName) : store
+      const request = options.range ? source.getAll(options.range) : source.getAll()
 
-      resolve(results)
+      request.onerror = () => reject(request.error)
+
+      request.onsuccess = () => {
+        finishQuery(request.result as T[], options, resolve)
+      }
     }
   })
+}
+
+/**
+ * 完成查询处理（排序和分页）
+ */
+function finishQuery<T>(
+  results: T[],
+  options: QueryOptions,
+  resolve: (value: T[]) => void
+): void {
+  // 应用排序
+  if (options.sort) {
+    const sorts = Array.isArray(options.sort) ? options.sort : [options.sort]
+    results.sort((a, b) => {
+      for (const sort of sorts) {
+        const aVal = getNestedValue(a, sort.field)
+        const bVal = getNestedValue(b, sort.field)
+        const comparison = compareValues(aVal, bVal)
+        if (comparison !== 0) {
+          return sort.order === 'asc' ? comparison : -comparison
+        }
+      }
+      return 0
+    })
+  }
+
+  // 应用分页
+  const offset = options.offset ?? 0
+  const limit = options.limit ?? results.length
+  const paginatedResults = results.slice(offset, offset + limit)
+
+  resolve(paginatedResults)
+}
+
+/**
+ * 检查数据是否匹配 where 条件
+ */
+function matchesWhereConditions<T>(item: T, where?: WhereCondition | WhereCondition[]): boolean {
+  if (!where) return true
+
+  const conditions = Array.isArray(where) ? where : [where]
+
+  return conditions.every((condition) => {
+    const value = getNestedValue(item, condition.field)
+    return matchCondition(value, condition.operator, condition.value)
+  })
+}
+
+/**
+ * 获取嵌套字段的值（支持 a.b.c 格式）
+ */
+function getNestedValue<T>(obj: T, path: string): unknown {
+  return path.split('.').reduce((current: unknown, key: string) => {
+    return current && typeof current === 'object' ? (current as Record<string, unknown>)[key] : undefined
+  }, obj as unknown)
+}
+
+/**
+ * 匹配单个条件
+ */
+function matchCondition(value: unknown, operator: QueryOperator, compareValue: unknown): boolean {
+  switch (operator) {
+    case 'eq':
+      return value === compareValue
+    case 'ne':
+      return value !== compareValue
+    case 'gt':
+      return (value as number) > (compareValue as number)
+    case 'gte':
+      return (value as number) >= (compareValue as number)
+    case 'lt':
+      return (value as number) < (compareValue as number)
+    case 'lte':
+      return (value as number) <= (compareValue as number)
+    case 'between':
+      if (Array.isArray(compareValue) && compareValue.length === 2) {
+        return (value as number) >= compareValue[0] && (value as number) <= compareValue[1]
+      }
+      return false
+    case 'in':
+      return Array.isArray(compareValue) && compareValue.includes(value)
+    case 'contains':
+      return String(value).includes(String(compareValue))
+    case 'startsWith':
+      return String(value).startsWith(String(compareValue))
+    case 'endsWith':
+      return String(value).endsWith(String(compareValue))
+    default:
+      return false
+  }
+}
+
+/**
+ * 比较两个值（用于排序）
+ */
+function compareValues(a: unknown, b: unknown): number {
+  if (a === b) return 0
+  if (a == null) return 1
+  if (b == null) return -1
+
+  if (typeof a === 'string' && typeof b === 'string') {
+    return a.localeCompare(b)
+  }
+
+  if (typeof a === 'number' && typeof b === 'number') {
+    return a - b
+  }
+
+  if (a instanceof Date && b instanceof Date) {
+    return a.getTime() - b.getTime()
+  }
+
+  return String(a).localeCompare(String(b))
 }
 
 /**

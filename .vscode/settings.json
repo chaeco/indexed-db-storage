@@ -1,0 +1,10 @@
+{
+  "editor.inlineSuggest.enabled": true,
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "always"
+  },
+  "github.copilot.enable": {
+    "*": true
+  }
+}

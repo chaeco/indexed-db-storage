@@ -17,11 +17,5 @@ export interface QueryOptions {
     where?: WhereCondition | WhereCondition[];
     sort?: SortOption | SortOption[];
     filter?: <T>(item: T) => boolean;
-    includeTotal?: boolean;
-}
-export interface QueryResult<T> {
-    data: T[];
-    total?: number;
-    hasMore?: boolean;
 }
 //# sourceMappingURL=operations.d.ts.map

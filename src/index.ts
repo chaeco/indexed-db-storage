@@ -12,13 +12,14 @@ export type {
   StoreConfig,
   IndexConfig,
   CleanupConfig,
-  // 操作类型
+  // 查询类型
+  QueryOperator,
+  WhereCondition,
+  SortOption,
   QueryOptions,
-  QueryResult,
   // 存储类型
   IStorage,
-  LifecycleHooks,
-  // 向后兼容
+  // 向后兼容别名
   StorageOptions as IndexedDBStorageOptions,
   QueryOptions as IndexedDBQueryOptions,
 } from './types/index'

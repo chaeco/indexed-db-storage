@@ -5,10 +5,9 @@ export declare class ConfigManager {
     constructor(options: StorageOptions, storeConfig?: StoreConfig);
     getDbName(): string;
     getStoreName(): string;
+    static buildInstanceKey(dbName: string, storeName: string): string;
     getInstanceKey(): string;
     getStoreConfig(): StoreConfig;
     getCleanupConfig(): CleanupConfig | null;
-    isCleanupEnabled(): boolean;
-    getAllOptions(): Readonly<StorageOptions>;
 }
 //# sourceMappingURL=config-manager.d.ts.map

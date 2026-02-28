@@ -1,14 +1,14 @@
 {
   "name": "@chaeco/indexed-db-storage",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A generic browser-based persistent storage using IndexedDB",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.js"
     }
   },
   "files": [

@@ -5,6 +5,8 @@
 // 避免循环依赖，使用泛型接口
 interface StorageInstance {
   close(): void
+  /** 关闭连接并从单例缓存中移除自身（= close + removeInstance） */
+  destroy(): void
 }
 
 /**
@@ -34,16 +36,19 @@ export function removeInstance(key: string): void {
 }
 
 /**
- * 清除所有实例
+ * 清除所有实例。
+ *
+ * 每个 destroy() 调用都包在 try/catch 中：
+ * - 确保单个实例清理失败不会跳过后续实例。
+ * - 最后的 instances.clear() 无论如何都会执行，map 保证被清空。
  */
 export function clearAllInstances(): void {
-  instances.forEach(instance => instance.close())
+  instances.forEach(instance => {
+    try {
+      instance.destroy()
+    } catch {
+      // best-effort：单个 destroy() 失败不阻止其余实例被清理
+    }
+  })
   instances.clear()
-}
-
-/**
- * 获取所有实例
- */
-export function getAllInstances(): StorageInstance[] {
-  return Array.from(instances.values())
 }

@@ -20,7 +20,7 @@ export interface StorageOptions {
 export interface CleanupConfig {
     maxRecords?: number;
     retentionTime?: number;
-    cleanupInterval?: number;
+    cleanupInterval: number;
     timestampIndexName?: string;
 }
 //# sourceMappingURL=config.d.ts.map

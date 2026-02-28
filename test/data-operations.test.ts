@@ -2,7 +2,7 @@
  * 数据操作模块测试
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   saveData,
   updateData,
@@ -126,6 +126,24 @@ describe('Data Operations', () => {
       const results = await queryData(db, 'test-store', { offset: 1, limit: 2 })
       expect(results).toHaveLength(2)
     })
+
+    it('should sort NaN values to the end', async () => {
+      // NaN 字段应排在末尾，不破坏其他记录的顺序
+      await saveData(db, 'test-store', { name: 'WithNaN', age: NaN })
+      await saveData(db, 'test-store', { name: 'Age10', age: 10 })
+      await saveData(db, 'test-store', { name: 'Age5', age: 5 })
+
+      const results = await queryData<{ name: string; age: number }>(db, 'test-store', {
+        where: { field: 'name', operator: 'in', value: ['WithNaN', 'Age10', 'Age5'] },
+        sort: { field: 'age', order: 'asc' },
+      })
+
+      expect(results).toHaveLength(3)
+      // 有效数字按升序排在前面，NaN 排在末尾
+      expect(results[0].age).toBe(5)
+      expect(results[1].age).toBe(10)
+      expect(isNaN(results[2].age)).toBe(true)
+    })
   })
 
   describe('clearAllData', () => {
@@ -149,6 +167,132 @@ describe('Data Operations', () => {
 
       await saveData(db, 'test-store', { name: 'test2' })
       expect(await getCount(db, 'test-store')).toBe(2)
+    })
+  })
+
+  describe('queryData 边界行为', () => {
+    beforeEach(async () => {
+      await saveData(db, 'test-store', { name: 'Alice', age: 25 })
+      await saveData(db, 'test-store', { name: 'Bob', age: 30 })
+    })
+
+    it('direction + 无 where/filter 时应输出 warn 并正常返回', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const results = await queryData(db, 'test-store', { direction: 'prev' })
+      expect(results).toHaveLength(2)
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"direction" option is ignored'))
+      warnSpy.mockRestore()
+    })
+
+    it('between compareValue 非数组时应输出 warn 并返回空结果', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const results = await queryData(db, 'test-store', {
+        where: { field: 'age', operator: 'between', value: 30 },
+      })
+      expect(results).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"between" operator requires an array'),
+        30
+      )
+      warnSpy.mockRestore()
+    })
+
+    it('未知 operator 时应输出 warn 并对所有记录返回 false', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const results = await queryData(db, 'test-store', {
+        // 强制传入无效 operator
+        where: { field: 'age', operator: 'unknown' as never, value: 25 },
+      })
+      expect(results).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Unknown query operator'))
+      warnSpy.mockRestore()
+    })
+
+    it('多条件排序时，所有字段相等的记录应保持稳定（return 0 路径）', async () => {
+      // Alice 和 Bob 的 age 均不同，但若按不存在的字段排序，所有值均为 undefined，走 compareValues 返回 0
+      const results = await queryData<{ name: string; age: number }>(db, 'test-store', {
+        where: { field: 'name', operator: 'in', value: ['Alice', 'Bob'] },
+        sort: { field: 'nonExistentField', order: 'asc' },
+      })
+      expect(results).toHaveLength(2)
+      // 顺序可任意，重点是不抛出错误
+    })
+  })
+
+  describe('compareValues 排序 - Date 与 String 回退', () => {
+    it('应支持按 Date 字段升序排序', async () => {
+      const d1 = new Date('2020-01-01')
+      const d2 = new Date('2023-06-15')
+      const d3 = new Date('2021-12-31')
+      await saveData(db, 'test-store', { name: 'D1', createdAt: d1 })
+      await saveData(db, 'test-store', { name: 'D3', createdAt: d3 })
+      await saveData(db, 'test-store', { name: 'D2', createdAt: d2 })
+
+      const results = await queryData<{ name: string; createdAt: Date }>(db, 'test-store', {
+        where: { field: 'name', operator: 'in', value: ['D1', 'D2', 'D3'] },
+        sort: { field: 'createdAt', order: 'asc' },
+      })
+
+      expect(results.map((r) => r.name)).toEqual(['D1', 'D3', 'D2'])
+    })
+
+    it('应支持按 Date 字段降序排序', async () => {
+      const d1 = new Date('2020-01-01')
+      const d2 = new Date('2023-06-15')
+      await saveData(db, 'test-store', { name: 'Early', createdAt: d1 })
+      await saveData(db, 'test-store', { name: 'Late', createdAt: d2 })
+
+      const results = await queryData<{ name: string; createdAt: Date }>(db, 'test-store', {
+        where: { field: 'name', operator: 'in', value: ['Early', 'Late'] },
+        sort: { field: 'createdAt', order: 'desc' },
+      })
+
+      expect(results[0].name).toBe('Late')
+      expect(results[1].name).toBe('Early')
+    })
+
+    it('sort 字段仅部分记录存在时，null/undefined 值应排在末尾', async () => {
+      // HasScore 有 score，NoScore 无 score（getNestedValue 返回 undefined）
+      await saveData(db, 'test-store', { name: 'HasScore', score: 50 })
+      await saveData(db, 'test-store', { name: 'NoScore' })
+
+      const results = await queryData<{ name: string; score?: number }>(db, 'test-store', {
+        where: { field: 'name', operator: 'in', value: ['HasScore', 'NoScore'] },
+        sort: { field: 'score', order: 'asc' },
+      })
+
+      // undefined 排末尾（compareValues: a==null → return 1）
+      expect(results[0].name).toBe('HasScore')
+      expect(results[1].name).toBe('NoScore')
+    })
+
+    it('sort 字段值均为 NaN 时应视为相等（isNaN(a) && isNaN(b) → return 0）', async () => {
+      await saveData(db, 'test-store', { name: 'NaN-A', score: NaN })
+      await saveData(db, 'test-store', { name: 'NaN-B', score: NaN })
+
+      const results = await queryData<{ name: string; score: number }>(db, 'test-store', {
+        where: { field: 'name', operator: 'in', value: ['NaN-A', 'NaN-B'] },
+        sort: { field: 'score', order: 'asc' },
+      })
+
+      // 两者均为 NaN → compareValues 返回 0 → 顺序任意，但不应抛出
+      expect(results).toHaveLength(2)
+      expect(results.every((r) => isNaN(r.score))).toBe(true)
+    })
+
+    it('非 string/number/Date 类型字段应回退到 String().localeCompare() 排序', async () => {
+      // boolean 值——不是 string/number/Date，走 String() 回退比较 ("false" < "true")
+      await saveData(db, 'test-store', { name: 'T', active: true })
+      await saveData(db, 'test-store', { name: 'F', active: false })
+
+      const results = await queryData<{ name: string; active: boolean }>(db, 'test-store', {
+        where: { field: 'name', operator: 'in', value: ['T', 'F'] },
+        sort: { field: 'active', order: 'asc' },
+      })
+
+      // "false" < "true" 以字典序，F 排前
+      expect(results[0].name).toBe('F')
+      expect(results[1].name).toBe('T')
     })
   })
 })

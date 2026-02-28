@@ -12,7 +12,7 @@ export interface IStorage<T = unknown> {
   init(): Promise<void>
   /** 保存数据 */
   save(data: T): Promise<IDBValidKey>
-  /** 更新数据 */
+  /** 更新数据（upsert：主键已存在则替换，否则插入） */
   update(data: T): Promise<IDBValidKey>
   /** 查询数据 */
   query(options?: QueryOptions): Promise<T[]>
@@ -24,22 +24,20 @@ export interface IStorage<T = unknown> {
   clear(): Promise<void>
   /** 获取总数 */
   count(): Promise<number>
-  /** 关闭连接 */
+  /**
+   * 手动触发一次清理（不依赖定时器，始终可调用）。
+   * 若构造时未配置 maxRecords/retentionTime，此方法是 no-op，不抛出错误。
+   */
+  cleanup(): Promise<void>
+  /**
+   * 关闭数据库连接，但**保留**单例缓存中的注册记录。
+   * 关闭后以相同参数 `new IndexedDBStorage()` 仍返回此实例（需重新调用 `init()`）。
+   * 若需同时清除单例注册，请改用 `destroy()`。
+   */
   close(): void
-}
-
-/**
- * 生命周期钩子
- */
-export interface LifecycleHooks {
-  /** 初始化前 */
-  beforeInit?(): Promise<void> | void
-  /** 初始化后 */
-  afterInit?(): Promise<void> | void
-  /** 保存前 */
-  beforeSave?<T>(data: T): Promise<T> | T
-  /** 保存后 */
-  afterSave?<T>(data: T, key: IDBValidKey): Promise<void> | void
-  /** 关闭前 */
-  beforeClose?(): Promise<void> | void
+  /**
+   * 关闭连接并从单例缓存中移除自身（= `close()` + 移除注册）。
+   * 之后以相同参数 `new IndexedDBStorage()` 将创建全新实例。
+   */
+  destroy(): void
 }

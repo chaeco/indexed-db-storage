@@ -36,26 +36,30 @@ export interface StorageOptions {
   dbName: string
   /** 对象存储名称 */
   storeName: string
-  /** 最大记录数（可选） */
+  /** 最大记录数（可选，必须为正整数） */
   maxRecords?: number
-  /** 数据保留时间（毫秒，可选） */
+  /** 数据保留时间（毫秒，可选，必须 > 0） */
   retentionTime?: number
-  /** 清理间隔（毫秒，可选） */
+  /** 清理间隔（毫秒，可选，必须 > 0） */
   cleanupInterval?: number
   /** 时间戳索引名称（用于清理，可选） */
   timestampIndexName?: string
 }
 
 /**
- * 清理配置
+ * 清理配置（由 ConfigManager.getCleanupConfig() 构造，cleanupInterval 始终有值）
  */
 export interface CleanupConfig {
   /** 最大记录数 */
   maxRecords?: number
   /** 保留时间（毫秒） */
   retentionTime?: number
-  /** 清理间隔（毫秒） */
-  cleanupInterval?: number
+  /**
+   * 清理间隔（毫秒）。
+   * 此字段在 CleanupConfig 对象内始终为正数——getCleanupConfig() 在
+   * cleanupInterval 未设置时直接返回 null，不会构造出该对象。
+   */
+  cleanupInterval: number
   /** 时间戳索引名称 */
   timestampIndexName?: string
 }

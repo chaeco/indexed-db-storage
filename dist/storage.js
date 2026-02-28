@@ -7,25 +7,25 @@ export class IndexedDBStorage {
     constructor(options, storeConfig) {
         this.db = null;
         this.initPromise = null;
+        this._initGeneration = 0;
         this.config = new ConfigManager(options, storeConfig);
         const instanceKey = this.config.getInstanceKey();
         const existing = InstanceManager.getInstance(instanceKey);
         if (existing) {
+            if (storeConfig) {
+                console.warn(`[IndexedDBStorage] An instance for dbName="${options.dbName}" storeName="${options.storeName}" already exists. ` +
+                    'The new storeConfig will be ignored. Call destroy() first if you need to reconfigure.');
+            }
             return existing;
         }
         InstanceManager.registerInstance(instanceKey, this);
     }
-    static getInstance(options, storeConfig) {
-        return new IndexedDBStorage(options, storeConfig);
-    }
     static clearInstance(options) {
         if (options) {
-            const config = new ConfigManager(options);
-            const key = config.getInstanceKey();
+            const key = ConfigManager.buildInstanceKey(options.dbName, options.storeName);
             const instance = InstanceManager.getInstance(key);
             if (instance) {
-                instance.close();
-                InstanceManager.removeInstance(key);
+                instance.destroy();
             }
         }
         else {
@@ -34,15 +34,21 @@ export class IndexedDBStorage {
     }
     async init() {
         if (this.db)
-            return Promise.resolve();
+            return;
         if (this.initPromise)
             return this.initPromise;
+        const generation = this._initGeneration;
         this.initPromise = (async () => {
             try {
                 const storeConfig = this.config.getStoreConfig();
-                this.db = await initDatabase(this.config.getDbName(), storeConfig);
+                const db = await initDatabase(this.config.getDbName(), storeConfig);
+                if (this._initGeneration !== generation) {
+                    db.close();
+                    throw new Error('Database initialization was cancelled because close() was called concurrently.');
+                }
+                this.db = db;
                 const cleanupConfig = this.config.getCleanupConfig();
-                if (cleanupConfig && this.db) {
+                if (cleanupConfig) {
                     this.cleanupManager = new CleanupManager(this.db, this.config.getStoreName(), cleanupConfig);
                     this.cleanupManager.start();
                 }
@@ -57,12 +63,9 @@ export class IndexedDBStorage {
         this.ensureInitialized();
         const key = await saveData(this.db, this.config.getStoreName(), data);
         if (this.cleanupManager) {
-            const cleanupConfig = this.config.getCleanupConfig();
-            if (cleanupConfig?.maxRecords) {
-                this.cleanupManager.cleanup().catch((err) => {
-                    console.warn('Cleanup after save failed:', err);
-                });
-            }
+            this.cleanupManager.cleanup().catch((err) => {
+                console.warn('[IndexedDBStorage] Cleanup after save failed:', err);
+            });
         }
         return key;
     }
@@ -71,28 +74,23 @@ export class IndexedDBStorage {
         return updateData(this.db, this.config.getStoreName(), data);
     }
     async query(options) {
-        if (!this.db)
-            return [];
+        this.ensureInitialized();
         return queryData(this.db, this.config.getStoreName(), options);
     }
     async get(key) {
-        if (!this.db)
-            return undefined;
+        this.ensureInitialized();
         return getData(this.db, this.config.getStoreName(), key);
     }
     async delete(key) {
-        if (!this.db)
-            return;
+        this.ensureInitialized();
         return deleteData(this.db, this.config.getStoreName(), key);
     }
     async clear() {
-        if (!this.db)
-            return;
+        this.ensureInitialized();
         return clearAllData(this.db, this.config.getStoreName());
     }
     async count() {
-        if (!this.db)
-            return 0;
+        this.ensureInitialized();
         return getCount(this.db, this.config.getStoreName());
     }
     async cleanup() {
@@ -106,11 +104,13 @@ export class IndexedDBStorage {
         }
     }
     close() {
+        this._initGeneration++;
         this.stopCleanupTimer();
+        this.cleanupManager = undefined;
+        this.initPromise = null;
         if (this.db) {
             this.db.close();
             this.db = null;
-            this.initPromise = null;
         }
     }
     destroy() {

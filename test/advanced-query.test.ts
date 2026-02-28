@@ -2,7 +2,7 @@
  * 高级查询功能测试
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { IndexedDBStorage } from '../src/storage'
 
 interface Employee {
@@ -111,6 +111,122 @@ describe('高级查询功能', () => {
       })
 
       expect(results.every((r) => r.age >= 25 && r.age <= 30)).toBe(true)
+    })
+
+    it('between 端点为 NaN 时应返回空结果并输出 warn', async () => {
+      // NaN 端点无法参与有意义的范围比较，应触发 warn 并对所有记录返回 false
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const results = await storage.query({
+        where: { field: 'age', operator: 'between', value: [NaN, 30] },
+      })
+      expect(results).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"between" operator received NaN'),
+        expect.anything()
+      )
+      warnSpy.mockRestore()
+    })
+
+    it('gt/lt compareValue 为 NaN 时应返回空结果并输出 warn', async () => {
+      // NaN 作为比较基准无意义，应触发 warn 而非静默让所有记录匹配失败
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const gtResults = await storage.query({
+        where: { field: 'age', operator: 'gt', value: NaN },
+      })
+      expect(gtResults).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"gt" operator received NaN')
+      )
+      warnSpy.mockClear()
+
+      const ltResults = await storage.query({
+        where: { field: 'age', operator: 'lt', value: NaN },
+      })
+      expect(ltResults).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"lt" operator received NaN')
+      )
+      warnSpy.mockRestore()
+    })
+
+    it('gte/lte compareValue 为 NaN 时应返回空结果并输出 warn', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+
+      const gteResults = await storage.query({
+        where: { field: 'age', operator: 'gte', value: NaN },
+      })
+      expect(gteResults).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"gte" operator received NaN')
+      )
+      warnSpy.mockClear()
+
+      const lteResults = await storage.query({
+        where: { field: 'age', operator: 'lte', value: NaN },
+      })
+      expect(lteResults).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"lte" operator received NaN')
+      )
+      warnSpy.mockRestore()
+    })
+
+    it('contains/startsWith/endsWith compareValue 为 NaN 时应返回空结果并输出 warn', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+
+      const containsResults = await storage.query({
+        where: { field: 'name', operator: 'contains', value: NaN },
+      })
+      expect(containsResults).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"contains" operator received NaN')
+      )
+      warnSpy.mockClear()
+
+      const startsWithResults = await storage.query({
+        where: { field: 'name', operator: 'startsWith', value: NaN },
+      })
+      expect(startsWithResults).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"startsWith" operator received NaN')
+      )
+      warnSpy.mockClear()
+
+      const endsWithResults = await storage.query({
+        where: { field: 'email', operator: 'endsWith', value: NaN },
+      })
+      expect(endsWithResults).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"endsWith" operator received NaN')
+      )
+      warnSpy.mockRestore()
+    })
+
+    it('between 倒置区间（min > max）时应返回空结果并输出 warn', async () => {
+      // 传入 [35, 25] 而非 [25, 35]，常见的参数顺序错误，应 warn 而非静默返回空
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const results = await storage.query({
+        where: { field: 'age', operator: 'between', value: [35, 25] },
+      })
+      expect(results).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"between" operator: min > max'),
+        expect.anything()
+      )
+      warnSpy.mockRestore()
+    })
+
+    it('in 的 compareValue 非数组时应返回空结果并输出 warn', async () => {
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const results = await storage.query({
+        where: { field: 'age', operator: 'in', value: 30 },
+      })
+      expect(results).toHaveLength(0)
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"in" operator requires an array'),
+        expect.anything()
+      )
+      warnSpy.mockRestore()
     })
 
     it('应该支持 in 查询', async () => {

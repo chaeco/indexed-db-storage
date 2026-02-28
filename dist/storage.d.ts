@@ -4,8 +4,8 @@ export declare class IndexedDBStorage<T = unknown> implements IStorage<T> {
     private db;
     private cleanupManager?;
     private initPromise;
+    private _initGeneration;
     constructor(options: StorageOptions, storeConfig?: StoreConfig);
-    static getInstance<T = unknown>(options: StorageOptions, storeConfig?: StoreConfig): IndexedDBStorage<T>;
     static clearInstance(options?: StorageOptions): void;
     init(): Promise<void>;
     save(data: T): Promise<IDBValidKey>;
@@ -16,7 +16,7 @@ export declare class IndexedDBStorage<T = unknown> implements IStorage<T> {
     clear(): Promise<void>;
     count(): Promise<number>;
     cleanup(): Promise<void>;
-    stopCleanupTimer(): void;
+    private stopCleanupTimer;
     close(): void;
     destroy(): void;
     private ensureInitialized;

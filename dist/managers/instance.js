@@ -9,10 +9,13 @@ export function removeInstance(key) {
     instances.delete(key);
 }
 export function clearAllInstances() {
-    instances.forEach(instance => instance.close());
+    instances.forEach(instance => {
+        try {
+            instance.destroy();
+        }
+        catch {
+        }
+    });
     instances.clear();
-}
-export function getAllInstances() {
-    return Array.from(instances.values());
 }
 //# sourceMappingURL=instance.js.map

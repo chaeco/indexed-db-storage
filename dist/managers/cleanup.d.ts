@@ -4,6 +4,7 @@ export declare class CleanupManager {
     private storeName;
     private config;
     private cleanupTimer?;
+    private isCleanupRunning;
     constructor(db: IDBDatabase, storeName: string, config: CleanupConfig);
     start(): void;
     stop(): void;

@@ -8,13 +8,8 @@ export interface IStorage<T = unknown> {
     delete(key: IDBValidKey): Promise<void>;
     clear(): Promise<void>;
     count(): Promise<number>;
+    cleanup(): Promise<void>;
     close(): void;
-}
-export interface LifecycleHooks {
-    beforeInit?(): Promise<void> | void;
-    afterInit?(): Promise<void> | void;
-    beforeSave?<T>(data: T): Promise<T> | T;
-    afterSave?<T>(data: T, key: IDBValidKey): Promise<void> | void;
-    beforeClose?(): Promise<void> | void;
+    destroy(): void;
 }
 //# sourceMappingURL=storage.d.ts.map

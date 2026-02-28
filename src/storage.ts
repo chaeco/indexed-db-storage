@@ -25,12 +25,21 @@ import {
  * const storage = new IndexedDBStorage({
  *   dbName: 'my-app',
  *   storeName: 'users',
- *   maxRecords: 1000,
  * })
  *
  * await storage.init()
  * await storage.save({ name: 'John', age: 30 })
  * const data = await storage.query({ limit: 10 })
+ * ```
+ *
+ * @example 开启自动清理
+ * ```typescript
+ * const storage = new IndexedDBStorage({
+ *   dbName: 'app-logs',
+ *   storeName: 'logs',
+ *   maxRecords: 1000,
+ *   cleanupInterval: 60 * 60 * 1000, // cleanupInterval 必须与 maxRecords/retentionTime 同时配置
+ * })
  * ```
  */
 export class IndexedDBStorage<T = unknown> implements IStorage<T> {
@@ -38,14 +47,22 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
   private db: IDBDatabase | null = null
   private cleanupManager?: CleanupManager
   private initPromise: Promise<void> | null = null
+  // 每次 close() 递增；init() 通过对比世代检测并发关闭，避免连接泄漏
+  private _initGeneration = 0
 
   constructor(options: StorageOptions, storeConfig?: StoreConfig) {
     this.config = new ConfigManager(options, storeConfig)
 
-    // 实现单例模式
     const instanceKey = this.config.getInstanceKey()
     const existing = InstanceManager.getInstance(instanceKey)
     if (existing) {
+      // 单例已存在时新 storeConfig 不会生效，避免调用方静默忽略
+      if (storeConfig) {
+        console.warn(
+          `[IndexedDBStorage] An instance for dbName="${options.dbName}" storeName="${options.storeName}" already exists. ` +
+          'The new storeConfig will be ignored. Call destroy() first if you need to reconfigure.'
+        )
+      }
       return existing as this
     }
 
@@ -53,27 +70,16 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
   }
 
   /**
-   * 获取实例（推荐直接使用构造函数）
-   * @deprecated 直接使用 new IndexedDBStorage() 即可
-   */
-  static getInstance<T = unknown>(
-    options: StorageOptions,
-    storeConfig?: StoreConfig
-  ): IndexedDBStorage<T> {
-    return new IndexedDBStorage<T>(options, storeConfig)
-  }
-
-  /**
-   * 清除指定的实例缓存
+   * 关闭并从单例缓存中移除指定实例。
+   * 传入 options 时精确移除对应实例；不传时清除所有实例。
    */
   static clearInstance(options?: StorageOptions): void {
     if (options) {
-      const config = new ConfigManager(options)
-      const key = config.getInstanceKey()
+      const key = ConfigManager.buildInstanceKey(options.dbName, options.storeName)
       const instance = InstanceManager.getInstance(key)
       if (instance) {
-        instance.close()
-        InstanceManager.removeInstance(key)
+        // destroy() = close() + removeInstance()，避免在此重复实现相同逻辑
+        instance.destroy()
       }
     } else {
       InstanceManager.clearAllInstances()
@@ -84,17 +90,29 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 初始化数据库
    */
   async init(): Promise<void> {
-    if (this.db) return Promise.resolve()
+    if (this.db) return
     if (this.initPromise) return this.initPromise
+
+    const generation = this._initGeneration
 
     this.initPromise = (async () => {
       try {
         const storeConfig = this.config.getStoreConfig()
-        this.db = await initDatabase(this.config.getDbName(), storeConfig)
+        const db = await initDatabase(this.config.getDbName(), storeConfig)
 
-        // 启动清理管理器
+        // 世代不匹配：等待期间 close() 已被调用，丢弃此连接避免泄漏。
+        // 抛出错误而非静默返回——静默返回 void 会让调用方误以为初始化成功。
+        if (this._initGeneration !== generation) {
+          db.close()
+          throw new Error(
+            'Database initialization was cancelled because close() was called concurrently.'
+          )
+        }
+
+        this.db = db
+
         const cleanupConfig = this.config.getCleanupConfig()
-        if (cleanupConfig && this.db) {
+        if (cleanupConfig) {
           this.cleanupManager = new CleanupManager(
             this.db,
             this.config.getStoreName(),
@@ -117,21 +135,22 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
     this.ensureInitialized()
     const key = await saveData(this.db!, this.config.getStoreName(), data)
 
-    // 异步触发清理
+    // 非阻塞地触发清理（fire-and-forget），避免影响 save() 的响应时间
     if (this.cleanupManager) {
-      const cleanupConfig = this.config.getCleanupConfig()
-      if (cleanupConfig?.maxRecords) {
-        this.cleanupManager.cleanup().catch((err: unknown) => {
-          console.warn('Cleanup after save failed:', err)
-        })
-      }
+      this.cleanupManager.cleanup().catch((err: unknown) => {
+        console.warn('[IndexedDBStorage] Cleanup after save failed:', err)
+      })
     }
 
     return key
   }
 
   /**
-   * 更新数据
+   * 更新数据（upsert 语义）。
+   *
+   * 底层使用 IndexedDB `put()`：若指定主键的记录已存在则替换整条记录，
+   * 若不存在则插入新记录。如需严格"仅更新已有记录"语义，请先调用
+   * `get()` 确认记录存在后再调用此方法。
    */
   async update(data: T): Promise<IDBValidKey> {
     this.ensureInitialized()
@@ -142,44 +161,45 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 查询数据
    */
   async query(options?: QueryOptions): Promise<T[]> {
-    if (!this.db) return []
-    return queryData<T>(this.db, this.config.getStoreName(), options)
+    this.ensureInitialized()
+    return queryData<T>(this.db!, this.config.getStoreName(), options)
   }
 
   /**
    * 根据主键获取数据
    */
   async get(key: IDBValidKey): Promise<T | undefined> {
-    if (!this.db) return undefined
-    return getData<T>(this.db, this.config.getStoreName(), key)
+    this.ensureInitialized()
+    return getData<T>(this.db!, this.config.getStoreName(), key)
   }
 
   /**
    * 删除数据
    */
   async delete(key: IDBValidKey): Promise<void> {
-    if (!this.db) return
-    return deleteData(this.db, this.config.getStoreName(), key)
+    this.ensureInitialized()
+    return deleteData(this.db!, this.config.getStoreName(), key)
   }
 
   /**
    * 清空所有数据
    */
   async clear(): Promise<void> {
-    if (!this.db) return
-    return clearAllData(this.db, this.config.getStoreName())
+    this.ensureInitialized()
+    return clearAllData(this.db!, this.config.getStoreName())
   }
 
   /**
    * 获取记录总数
    */
   async count(): Promise<number> {
-    if (!this.db) return 0
-    return getCount(this.db, this.config.getStoreName())
+    this.ensureInitialized()
+    return getCount(this.db!, this.config.getStoreName())
   }
 
   /**
-   * 手动触发清理
+   * 手动触发一次清理，不依赖定时器。
+   * 若构造时未配置 maxRecords/retentionTime，此方法是 no-op，不抛出错误。
    */
   async cleanup(): Promise<void> {
     if (this.cleanupManager) {
@@ -187,29 +207,31 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
     }
   }
 
-  /**
-   * 停止清理任务
-   */
-  stopCleanupTimer(): void {
+  /** close() / destroy() 的内部辅助，停止清理定时器 */
+  private stopCleanupTimer(): void {
     if (this.cleanupManager) {
       this.cleanupManager.stop()
     }
   }
 
   /**
-   * 关闭数据库连接
+   * 关闭数据库连接。
+   * 若 init() 正在进行中，世代递增会使其结果失效并抛出错误，避免竞态连接泄漏。
    */
   close(): void {
+    this._initGeneration++
     this.stopCleanupTimer()
+    this.cleanupManager = undefined
+    this.initPromise = null
     if (this.db) {
       this.db.close()
       this.db = null
-      this.initPromise = null
     }
   }
 
   /**
-   * 销毁实例
+   * 关闭连接并从单例缓存中移除此实例（= close + removeInstance）。
+   * 之后以相同参数调用 `new IndexedDBStorage()` 将创建全新实例。
    */
   destroy(): void {
     this.close()

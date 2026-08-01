@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.4] - 2026-08-02
+
+### Optimized
+- **Cursor query performance**: `query()` with `where`/`filter` and **no sort** now early-terminates cursor traversal once `offset + limit` records are collected, avoiding full-store scans on large datasets.
+
+### Improved
+- **Test coverage**: Added `test/database.test.ts` with 5 test cases covering store creation, index creation, upgrade path (store not found), and store reuse scenarios. Database module statement coverage from 52.77% → 83.33%.
+- **Config**: Added `"type": "module"` to `package.json` to eliminate ESLint module-type warning.
+
+### Fixed
+- **Documentation**: Updated `README.zh-CN.md` test count from 44 to 83 (now 90); corrected `CHANGELOG.md` `cleanupInterval` description to match the actual validation code.
+
 ## [0.0.3] - 2026-01-29
 
 ### Improved
@@ -12,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Refined singleton instance protection to prevent multiple initializations.
   - Added race condition protection in `init()` using a generation counter to prevent connection leaks during concurrent calls.
   - Added strict `NaN` guards in `query()` to prevent silent matching failures (NaN no longer matches "nan" strings).
-  - Validated `cleanupInterval` to ensure it is at least 1000ms.
+  - Validated `cleanupInterval` to ensure it is a finite positive number.
 - **Query Operators**:
   - `between` operator now handles inverted ranges (start > end) by automatically swapping them and issuing a warning.
   - Unified all warning logs with `[IndexedDBStorage]` prefix for better filtering.

@@ -17,7 +17,7 @@ A universal IndexedDB storage solution providing powerful persistent storage cap
 - ⚙️ **Flexible Configuration** - Customize `keyPath`, indexes, and other database settings.
 - 📦 **Zero Dependencies** - Lightweight design with no external dependencies.
 - 🚀 **Modern API** - Promise-based asynchronous API for seamless integration with `async/await`.
-- ✅ **Well Tested** - 83 test cases with extensive coverage of core logic and edge cases.
+- ✅ **Well Tested** - 90 test cases with extensive coverage of core logic and edge cases.
 
 ## Installation
 

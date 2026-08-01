@@ -46,8 +46,9 @@ export async function updateData<T>(
  *
  * 内部走两条路径：
  * - **游标路径**（存在 `where` 或 `filter`）：逐条遍历，支持 `direction`、复杂过滤；
- *   注意 `limit`/`offset` **在游标遍历完成、所有匹配记录收集完毕后**才切片应用，
- *   并不提前终止遍历。大数据量场景请尽量结合 `range` 缩小扫描范围。
+ *   当**没有排序**时，limit 可在收集到 `offset + limit` 条记录后**提前终止游标遍历**，
+ *   避免扫描整个 store。有排序需求时必须收集全部匹配记录才能正确排序，请结合 `range`
+ *   缩小扫描范围。
  * - **getAll 路径**（无 `where`/`filter`）：一次性取回全部记录，性能更优，
  *   但 `direction` 选项**不生效**（getAll 始终以存储默认顺序返回）。
  */
@@ -79,7 +80,17 @@ export async function queryData<T>(
             }
           }
 
-          cursor.continue()
+          // 当没有排序需求时，可在收集到足够记录后提前终止游标遍历，
+          // 避免扫描整个 store 中所有匹配的记录。
+          // 有排序需求时必须收集全部记录才能正确排序。
+          const noSort = !options.sort
+          const limit = options.limit
+          const offset = options.offset ?? 0
+          if (noSort && limit !== undefined && results.length >= offset + limit) {
+            finishQuery(results, options, resolve)
+          } else {
+            cursor.continue()
+          }
         } else {
           finishQuery(results, options, resolve)
         }

@@ -55,8 +55,10 @@ export interface QueryOptions {
   /**
    * 返回数量限制。
    *
-   * 注意：当使用 `where` 或 `filter`（游标路径）时，limit 在游标遍历完成、所有匹配记录
-   * 收集完毕后才切片应用，**并不提前终止遍历**。大数据量时请结合 `range`（IDBKeyRange）缩小扫描范围。
+   * 在游标路径（存在 `where` 或 `filter`）且**没有排序**时，limit 可在收集到
+   * `offset + limit` 条记录后**提前终止游标遍历**，避免扫描整个 store。
+   * 当存在排序时需要遍历所有匹配记录才能正确排序，limit 仅在最终切片阶段应用。
+   * 大数据量且有排序需求时，请结合 `range`（IDBKeyRange）缩小扫描范围。
    */
   limit?: number
   /** 偏移量 */

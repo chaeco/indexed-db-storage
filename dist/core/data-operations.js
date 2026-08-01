@@ -34,7 +34,15 @@ export async function queryData(db, storeName, options = {}) {
                             results.push(item);
                         }
                     }
-                    cursor.continue();
+                    const noSort = !options.sort;
+                    const limit = options.limit;
+                    const offset = options.offset ?? 0;
+                    if (noSort && limit !== undefined && results.length >= offset + limit) {
+                        finishQuery(results, options, resolve);
+                    }
+                    else {
+                        cursor.continue();
+                    }
                 }
                 else {
                     finishQuery(results, options, resolve);

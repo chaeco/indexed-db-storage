@@ -122,6 +122,42 @@ describe('Data Operations', () => {
       expect(results).toHaveLength(2)
     })
 
+    it('should early-terminate cursor when limit is set without sort (where path)', async () => {
+      // 大量数据时，无排序的游标路径应在收集到 offset+limit 条后提前终止
+      for (let i = 0; i < 10; i++) {
+        await saveData(db, 'test-store', { name: `Extra ${i}`, age: i })
+      }
+
+      const results = await queryData(db, 'test-store', {
+        where: { field: 'age', operator: 'gte', value: 0 },
+        filter: (item: any) => item.age % 2 === 0,
+        limit: 3,
+      })
+
+      // 即使有 10+ 条匹配记录，limit=3 应只返回 3 条
+      expect(results).toHaveLength(3)
+      results.forEach((r: any) => expect(r.age % 2 === 0).toBe(true))
+    })
+
+    it('should not early-terminate when sort is set (needs all records)', async () => {
+      // 有排序时，limit 不提前终止，确保所有记录参与排序
+      for (let i = 0; i < 10; i++) {
+        await saveData(db, 'test-store', { name: `Sort ${i}`, age: 9 - i })
+      }
+
+      const results = await queryData<{ name: string; age: number }>(db, 'test-store', {
+        where: { field: 'age', operator: 'gte', value: 0 },
+        sort: { field: 'age', order: 'asc' },
+        limit: 3,
+      })
+
+      // 全部 13 条记录（3 条已有 + 10 条新增）参与排序后取前 3
+      expect(results).toHaveLength(3)
+      expect(results[0].age).toBe(0)
+      expect(results[1].age).toBe(1)
+      expect(results[2].age).toBe(2)
+    })
+
     it('should respect offset', async () => {
       const results = await queryData(db, 'test-store', { offset: 1, limit: 2 })
       expect(results).toHaveLength(2)

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>IndexedDB Storage — 通用浏览器持久化存储</title>
+  <meta name="description" content="IndexedDB Storage：通用 IndexedDB 存储方案。支持高级查询、自动清理、类型安全、零依赖，浏览器持久化一步到位。" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230b0f14'/%3E%3Ctext x='16' y='23' font-family='monospace' font-size='18' font-weight='700' fill='%2360a5fa' text-anchor='middle'%3E%DB%3C/text%3E%3C/svg%3E" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <div class="backdrop" aria-hidden="true">
+    <div class="backdrop__grid"></div>
+    <div class="backdrop__glow"></div>
+  </div>
+
+  <header class="nav">
+    <div class="nav__inner">
+      <a class="brand" href="#top">
+        <span class="brand__mark" aria-hidden="true">⛁</span>
+        <span class="brand__name">indexed-db-storage</span>
+      </a>
+      <nav class="nav__links" aria-label="页面导航">
+        <a href="#why">为什么</a>
+        <a href="#features">特性</a>
+        <a href="#demo">用法</a>
+        <a href="#query">高级查询</a>
+        <a href="#install">安装</a>
+      </nav>
+      <a class="btn btn--solid nav__cta" href="#install">开始使用</a>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ── Hero ───────────────────────────────────────────── -->
+    <section class="hero" id="top">
+      <div class="hero__inner">
+        <div class="hero__copy">
+          <p class="eyebrow reveal">浏览器原生 · 零依赖 · 类型安全</p>
+          <h1 class="hero__title">
+            <span class="line"><span class="word">浏览器</span></span>
+            <span class="line"><span class="word accent">持久化</span></span>
+          </h1>
+          <p class="hero__lead reveal">通用 IndexedDB 存储方案：任何数据类型、强大查询、自动清理。Promise 异步 API，与 <code>async/await</code> 无缝集成。</p>
+          <div class="hero__actions reveal">
+            <a class="btn btn--solid" href="#install">安装 indexed-db-storage</a>
+            <a class="btn btn--ghost" href="#demo">看用法 ↓</a>
+          </div>
+        </div>
+
+        <div class="terminal reveal" aria-label="IndexedDB Storage 演示终端">
+          <div class="terminal__bar">
+            <span class="terminal__dot" aria-hidden="true"></span>
+            <span class="terminal__dot" aria-hidden="true"></span>
+            <span class="terminal__dot" aria-hidden="true"></span>
+            <span class="terminal__title">await storage.query(...)</span>
+          </div>
+          <div class="terminal__body">
+            <pre class="terminal__code" id="terminalCode"><code></code></pre>
+            <div class="terminal__output" id="terminalOutput">
+              <div class="terminal__row"><span class="tok-comment">-- 操作</span></div>
+              <div class="terminal__row tok-sql" id="termSql"></div>
+              <div class="terminal__row"><span class="tok-comment">-- 参数</span></div>
+              <div class="terminal__row tok-param" id="termParams"></div>
+              <div class="terminal__row"><span class="tok-comment">-- 结果</span></div>
+              <div class="terminal__row terminal__result" id="termResult"></div>
+            </div>
+            <div class="terminal__caret" id="terminalCaret" aria-hidden="true">█</div>
+          </div>
+        </div>
+      </div>
+      <div class="hero__scroll-hint" aria-hidden="true">
+        <span>向下滚动</span>
+        <span class="hero__scroll-line"></span>
+      </div>
+    </section>
+
+    <script type="application/json" id="terminalSteps">
+    [
+      {
+        "code": "const storage = new IndexedDBStorage<User>({ dbName: 'my-app', storeName: 'users' }, { keyPath: 'id', autoIncrement: true })\nawait storage.init()\nawait storage.save({ name: 'John Doe', email: 'john@example.com' })",
+        "sql":    "IndexedDB my-app / users",
+        "params": "type: User",
+        "result": "保存成功 · 自动分配 id"
+      },
+      {
+        "code": "const users = await storage.query({ where: { field: 'age', operator: 'gte', value: 18 }, limit: 10 })",
+        "sql":    "条件查询（gte ≥ 18）",
+        "params": "limit: 10",
+        "result": "[User, ...] 按条件过滤"
+      },
+      {
+        "code": "await storage.update({ id: 1, name: 'Jane Doe' })\nawait storage.delete(1)\nawait storage.clear()",
+        "sql":    "update / delete / clear",
+        "params": "索引查询也支持",
+        "result": "批量操作完成"
+      }
+    ]
+    </script>
+
+    <!-- ── 事实带 ─────────────────────────────────────────── -->
+    <section class="facts" aria-label="IndexedDB Storage 关键事实">
+      <div class="facts__inner">
+        <div class="fact">
+          <span class="fact__value" data-count="0">0</span>
+          <span class="fact__label">运行时依赖</span>
+        </div>
+        <div class="fact">
+          <span class="fact__value" data-count="90">90</span>
+          <span class="fact__label">测试用例</span>
+        </div>
+        <div class="fact">
+          <span class="fact__value fact__value--mono">any</span>
+          <span class="fact__label">支持任意数据类型</span>
+        </div>
+        <div class="fact">
+          <span class="fact__value">100%</span>
+          <span class="fact__label">TypeScript 泛型</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- ── 为什么 ─────────────────────────────────────────── -->
+    <section class="why section" id="why">
+      <div class="section__head">
+        <p class="eyebrow">为什么是 IndexedDB Storage</p>
+        <h2 class="section__title">IndexedDB 的强大，不该难用。</h2>
+        <p class="section__sub">把原生 IndexedDB 的样板代码封装掉，留下干净的 Promise API 与类型安全。</p>
+      </div>
+      <div class="why__grid">
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">?</div>
+          <h3 class="card__title">高级查询</h3>
+          <p class="card__body"><code>where</code> 条件、多字段排序、自定义过滤、复杂范围查询。</p>
+          <pre class="card__code"><code>storage.query({
+  where: { field: <span class="tok-str">'age'</span>, operator: <span class="tok-str">'between'</span>, value: [<span class="tok-num">25</span>, <span class="tok-num">35</span>] },
+})</code></pre>
+        </article>
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">!</div>
+          <h3 class="card__title">自动清理</h3>
+          <p class="card__body">基于容量或年龄的自动保留机制，定期清理过期数据。</p>
+          <pre class="card__code"><code>{
+  maxRecords: <span class="tok-num">1000</span>,
+  retentionTime: <span class="tok-num">7</span> * <span class="tok-num">24</span> * <span class="tok-num">60</span> * <span class="tok-num">60</span> * <span class="tok-num">1000</span>,
+  cleanupInterval: <span class="tok-num">60</span> * <span class="tok-num">60</span> * <span class="tok-num">1000</span>,
+}</code></pre>
+        </article>
+        <article class="card reveal">
+          <div class="card__icon" aria-hidden="true">→</div>
+          <h3 class="card__title">单例模式</h3>
+          <p class="card__body">按 <code>dbName + storeName</code> 自动复用连接，相同配置不再重复初始化。</p>
+          <pre class="card__code"><code><span class="tok-comment">// 相同配置 → 复用同一实例</span>
+<span class="tok-var">new</span> IndexedDBStorage({ dbName: <span class="tok-str">'app'</span>, storeName: <span class="tok-str">'users'</span> }, cfg)
+<span class="tok-var">new</span> IndexedDBStorage({ dbName: <span class="tok-str">'app'</span>, storeName: <span class="tok-str">'users'</span> }, cfg)</code></pre>
+        </article>
+      </div>
+    </section>
+
+    <!-- ── 用法演示 ───────────────────────────────────────── -->
+    <section class="demo section" id="demo">
+      <div class="section__head">
+        <p class="eyebrow">用法</p>
+        <h2 class="section__title">从保存到查询，五步走。</h2>
+        <p class="section__sub">初始化 → 保存 → 查询 → 更新 → 删除，全是 Promise。</p>
+      </div>
+
+      <div class="demo__tabs" role="tablist" aria-label="用法示例">
+        <button class="demo__tab is-active" role="tab" aria-selected="true" aria-controls="tab-basic" data-tab="basic">快速开始</button>
+        <button class="demo__tab" role="tab" aria-selected="false" aria-controls="tab-index" data-tab="index">索引查询</button>
+      </div>
+
+      <div class="demo__panel is-active" id="tab-basic" role="tabpanel" data-panel="basic">
+        <pre class="demo__code"><code><span class="tok-var">import</span> { IndexedDBStorage } <span class="tok-var">from</span> <span class="tok-str">'@chaeco/indexed-db-storage'</span>;
+
+<span class="tok-var">const</span> storage = <span class="tok-var">new</span> IndexedDBStorage&lt;User&gt;(
+  { dbName: <span class="tok-str">'my-app'</span>, storeName: <span class="tok-str">'users'</span> },
+  { storeName: <span class="tok-str">'users'</span>, keyPath: <span class="tok-str">'id'</span>, autoIncrement: <span class="tok-kw">true</span> },
+);
+
+<span class="tok-var">await</span> storage.init();
+
+<span class="tok-var">await</span> storage.save({ name: <span class="tok-str">'John Doe'</span>, email: <span class="tok-str">'john@example.com'</span> });
+<span class="tok-var">const</span> users = <span class="tok-var">await</span> storage.query({ limit: <span class="tok-num">10</span> });
+<span class="tok-var">const</span> user = <span class="tok-var">await</span> storage.get(<span class="tok-num">1</span>);
+<span class="tok-var">await</span> storage.update({ id: <span class="tok-num">1</span>, name: <span class="tok-str">'Jane Doe'</span> });
+<span class="tok-var">await</span> storage.delete(<span class="tok-num">1</span>);</code></pre>
+      </div>
+
+      <div class="demo__panel" id="tab-index" role="tabpanel" data-panel="index">
+        <pre class="demo__code"><code><span class="tok-comment">// 按索引查询</span>
+<span class="tok-var">const</span> products = <span class="tok-var">await</span> storage.query({
+  indexName: <span class="tok-str">'category'</span>,
+  range: IDBKeyRange.only(<span class="tok-str">'electronics'</span>),
+  limit: <span class="tok-num">20</span>,
+});
+
+<span class="tok-comment">// 范围查询</span>
+<span class="tok-var">const</span> expensive = <span class="tok-var">await</span> storage.query({
+  indexName: <span class="tok-str">'price'</span>,
+  range: IDBKeyRange.lowerBound(<span class="tok-num">1000</span>),
+  limit: <span class="tok-num">10</span>,
+});</code></pre>
+      </div>
+    </section>
+
+    <!-- ── 高级查询 ───────────────────────────────────────── -->
+    <section class="honest section" id="query">
+      <div class="section__head">
+        <p class="eyebrow">高级查询</p>
+        <h2 class="section__title">一套操作符，覆盖常见需求。</h2>
+        <p class="section__sub">等值、比较、范围、字符串匹配——全部内置。</p>
+      </div>
+      <div class="table-wrap reveal">
+        <table>
+          <thead>
+            <tr><th>操作符</th><th>说明</th><th>示例</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>eq</code></td><td>等值</td><td><code>{ field: 'age', operator: 'eq', value: 25 }</code></td></tr>
+            <tr><td><code>gt</code> / <code>gte</code> / <code>lt</code> / <code>lte</code></td><td>比较</td><td><code>{ operator: 'gt', value: 30 }</code></td></tr>
+            <tr><td><code>between</code></td><td>范围</td><td><code>{ operator: 'between', value: [25, 35] }</code></td></tr>
+            <tr><td><code>contains</code></td><td>包含</td><td><code>{ field: 'name', operator: 'contains', value: 'hn' }</code></td></tr>
+            <tr><td><code>startsWith</code></td><td>前缀</td><td><code>{ field: 'name', operator: 'startsWith', value: 'Jo' }</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── 安装 / CTA ─────────────────────────────────────── -->
+    <section class="cta section" id="install">
+      <div class="cta__box">
+        <p class="eyebrow">开始使用</p>
+        <h2 class="cta__title">浏览器数据，就该这么存。</h2>
+        <pre class="cta__cmd"><code>$ npm install github:chaeco/indexed-db-storage</code><span class="cta__cursor" aria-hidden="true"></span></pre>
+        <p class="cta__note">浏览器 · 零依赖 · 全 TypeScript · MIT</p>
+        <div class="cta__actions">
+          <a class="btn btn--solid" href="https://github.com/chaeco/indexed-db-storage" target="_blank" rel="noopener">GitHub →</a>
+          <a class="btn btn--ghost" href="https://github.com/chaeco/indexed-db-storage#readme" target="_blank" rel="noopener">阅读文档</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="footer__inner">
+      <span class="brand"><span class="brand__mark" aria-hidden="true">⛁</span> indexed-db-storage</span>
+      <p>原生持久化 · 高级查询 · 自动清理</p>
+      <p class="footer__meta">MIT License · @chaeco/indexed-db-storage</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -222,7 +222,7 @@ describe('IndexedDBStorage', () => {
 
   describe('Singleton Lifecycle', () => {
     it('should warn when creating duplicate instance with storeConfig', () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
       const s1 = new IndexedDBStorage(
         { dbName: 'dup-warn-db', storeName: 'dup-store' },
@@ -235,9 +235,7 @@ describe('IndexedDBStorage', () => {
       )
 
       expect(s1).toBe(s2)
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('already exists')
-      )
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('already exists'))
       warnSpy.mockRestore()
       s1.destroy()
     })
@@ -297,9 +295,7 @@ describe('IndexedDBStorage', () => {
           storeName: 'idx-store',
           keyPath: 'id',
           autoIncrement: true,
-          indexes: [
-            { name: 'by-name', keyPath: 'name', options: { unique: false } },
-          ],
+          indexes: [{ name: 'by-name', keyPath: 'name', options: { unique: false } }],
         }
       )
       // init 成功即表示索引被正确创建
@@ -314,17 +310,15 @@ describe('IndexedDBStorage', () => {
         {
           dbName: 'retention-test-db',
           storeName: 'retention-store',
-          retentionTime: 1000,        // 1 秒保留期
-          cleanupInterval: 9999999,   // 足够大，避免定时器自动触发
+          retentionTime: 1000, // 1 秒保留期
+          cleanupInterval: 9999999, // 足够大，避免定时器自动触发
           timestampIndexName: 'by-timestamp',
         },
         {
           storeName: 'retention-store',
           keyPath: 'id',
           autoIncrement: true,
-          indexes: [
-            { name: 'by-timestamp', keyPath: 'timestamp', options: { unique: false } },
-          ],
+          indexes: [{ name: 'by-timestamp', keyPath: 'timestamp', options: { unique: false } }],
         }
       )
       await retentionStorage.init()
@@ -351,7 +345,7 @@ describe('IndexedDBStorage', () => {
     })
 
     it('should warn and skip deleteExpiredData when timestamp index does not exist', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
       // store 没有 timestamp 索引，但配了 retentionTime
       const s = new IndexedDBStorage<{ name: string }>(
@@ -374,9 +368,7 @@ describe('IndexedDBStorage', () => {
 
       // cleanup 应不抛出，并输出 warn
       await expect(s.cleanup()).resolves.not.toThrow()
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('timestamp index')
-      )
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('timestamp index'))
 
       warnSpy.mockRestore()
       s.destroy()

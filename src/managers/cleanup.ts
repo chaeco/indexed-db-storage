@@ -77,7 +77,7 @@ export class CleanupManager {
       if (!store.indexNames.contains(timestampIndexName)) {
         console.warn(
           `[IndexedDBStorage] Cleanup: timestamp index "${timestampIndexName}" not found on store "${this.storeName}". ` +
-          'Expired data will not be deleted. Add the index or set timestampIndexName correctly.'
+            'Expired data will not be deleted. Add the index or set timestampIndexName correctly.'
         )
         // 预期行为的 abort：立即释放资源；覆写 onabort 为 resolve 避免误 reject
         transaction.onabort = () => resolve()

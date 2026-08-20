@@ -213,7 +213,7 @@ describe('Data Operations', () => {
     })
 
     it('direction + 无 where/filter 时应输出 warn 并正常返回', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const results = await queryData(db, 'test-store', { direction: 'prev' })
       expect(results).toHaveLength(2)
       expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"direction" option is ignored'))
@@ -221,7 +221,7 @@ describe('Data Operations', () => {
     })
 
     it('between compareValue 非数组时应输出 warn 并返回空结果', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const results = await queryData(db, 'test-store', {
         where: { field: 'age', operator: 'between', value: 30 },
       })
@@ -234,7 +234,7 @@ describe('Data Operations', () => {
     })
 
     it('未知 operator 时应输出 warn 并对所有记录返回 false', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const results = await queryData(db, 'test-store', {
         // 强制传入无效 operator
         where: { field: 'age', operator: 'unknown' as never, value: 25 },
@@ -269,7 +269,7 @@ describe('Data Operations', () => {
         sort: { field: 'createdAt', order: 'asc' },
       })
 
-      expect(results.map((r) => r.name)).toEqual(['D1', 'D3', 'D2'])
+      expect(results.map(r => r.name)).toEqual(['D1', 'D3', 'D2'])
     })
 
     it('应支持按 Date 字段降序排序', async () => {
@@ -313,7 +313,7 @@ describe('Data Operations', () => {
 
       // 两者均为 NaN → compareValues 返回 0 → 顺序任意，但不应抛出
       expect(results).toHaveLength(2)
-      expect(results.every((r) => isNaN(r.score))).toBe(true)
+      expect(results.every(r => isNaN(r.score))).toBe(true)
     })
 
     it('非 string/number/Date 类型字段应回退到 String().localeCompare() 排序', async () => {

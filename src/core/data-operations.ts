@@ -102,7 +102,7 @@ export async function queryData<T>(
       if (options.direction) {
         console.warn(
           '[IndexedDBStorage] queryData: "direction" option is ignored when no "where" or "filter" is provided, ' +
-          'because getAll() is used instead of a cursor. Use "sort" or add a "where"/"filter" condition to enable cursor traversal.'
+            'because getAll() is used instead of a cursor. Use "sort" or add a "where"/"filter" condition to enable cursor traversal.'
         )
       }
       const source = options.indexName ? store.index(options.indexName) : store
@@ -120,11 +120,7 @@ export async function queryData<T>(
 /**
  * 对结果排序（复制后排序，不修改 IDB 原始数组）并应用分页，然后 resolve。
  */
-function finishQuery<T>(
-  results: T[],
-  options: QueryOptions,
-  resolve: (value: T[]) => void
-): void {
+function finishQuery<T>(results: T[], options: QueryOptions, resolve: (value: T[]) => void): void {
   let sorted = results
   if (options.sort) {
     const sorts = Array.isArray(options.sort) ? options.sort : [options.sort]
@@ -146,9 +142,7 @@ function finishQuery<T>(
   //   负 offset → slice 从末尾计算，不符合"跳过 N 条"语义
   //   负 limit  → slice(0, -3) 返回"倒数第3条之前的所有记录"，而非"取0条"
   const offset = Math.max(0, Math.floor(options.offset ?? 0))
-  const limit = options.limit !== undefined
-    ? Math.max(0, Math.floor(options.limit))
-    : sorted.length
+  const limit = options.limit !== undefined ? Math.max(0, Math.floor(options.limit)) : sorted.length
   const paginatedResults = sorted.slice(offset, offset + limit)
 
   resolve(paginatedResults)
@@ -162,7 +156,7 @@ function matchesWhereConditions(item: unknown, where?: WhereCondition | WhereCon
 
   const conditions = Array.isArray(where) ? where : [where]
 
-  return conditions.every((condition) => {
+  return conditions.every(condition => {
     const value = getNestedValue(item, condition.field)
     return matchCondition(value, condition.operator, condition.value)
   })
@@ -237,8 +231,10 @@ function matchCondition(value: unknown, operator: QueryOperator, compareValue: u
         // 区间端点为 null/undefined 时视为条件不满足，而非与数值做 NaN 比较
         if (compareValue[0] == null || compareValue[1] == null) return false
         // NaN 端点与 null 同等处理：无法参与有意义的范围比较，静默返回 false 会让调用方难以发现错误
-        if ((typeof compareValue[0] === 'number' && isNaN(compareValue[0])) ||
-          (typeof compareValue[1] === 'number' && isNaN(compareValue[1]))) {
+        if (
+          (typeof compareValue[0] === 'number' && isNaN(compareValue[0])) ||
+          (typeof compareValue[1] === 'number' && isNaN(compareValue[1]))
+        ) {
           console.warn(
             '[IndexedDBStorage] "between" operator received NaN as an endpoint. Condition will evaluate to false.',
             compareValue
@@ -288,7 +284,9 @@ function matchCondition(value: unknown, operator: QueryOperator, compareValue: u
     default:
       // TypeScript 编译期可约束 operator，但 JS 侧调用或强制类型转换时仍可传入非法值。
       // 静默 return false 会使拼写错误（如 'eq ' 代替 'eq'）完全不可见。
-      console.warn(`[IndexedDBStorage] Unknown query operator: "${operator as string}". Condition will evaluate to false.`)
+      console.warn(
+        `[IndexedDBStorage] Unknown query operator: "${operator as string}". Condition will evaluate to false.`
+      )
       return false
   }
 }
@@ -299,8 +297,8 @@ function matchCondition(value: unknown, operator: QueryOperator, compareValue: u
  */
 function compareValues(a: unknown, b: unknown): number {
   if (a === b) return 0
-  if (a == null) return 1   // null/undefined 排末尾
-  if (b == null) return -1  // null/undefined 排末尾
+  if (a == null) return 1 // null/undefined 排末尾
+  if (b == null) return -1 // null/undefined 排末尾
 
   if (typeof a === 'string' && typeof b === 'string') {
     return a.localeCompare(b)

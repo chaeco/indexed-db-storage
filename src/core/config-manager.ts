@@ -27,13 +27,17 @@ export class ConfigManager {
     }
     if (options.retentionTime !== undefined) {
       if (!Number.isFinite(options.retentionTime) || options.retentionTime <= 0) {
-        throw new Error('StorageOptions.retentionTime must be a finite positive number (milliseconds).')
+        throw new Error(
+          'StorageOptions.retentionTime must be a finite positive number (milliseconds).'
+        )
       }
     }
     if (options.cleanupInterval !== undefined) {
       // Infinity 会使 setInterval 行为因运行时而异（可能立即触发或永不触发）
       if (!Number.isFinite(options.cleanupInterval) || options.cleanupInterval <= 0) {
-        throw new Error('StorageOptions.cleanupInterval must be a finite positive number (milliseconds).')
+        throw new Error(
+          'StorageOptions.cleanupInterval must be a finite positive number (milliseconds).'
+        )
       }
     }
     // retentionTime / maxRecords 必须配合 cleanupInterval 才会生效；
@@ -42,8 +46,8 @@ export class ConfigManager {
     if ((options.retentionTime || options.maxRecords) && !options.cleanupInterval) {
       console.warn(
         '[IndexedDBStorage] retentionTime/maxRecords is set but cleanupInterval is missing. ' +
-        'Automatic cleanup will never run. Please set cleanupInterval to enable it, ' +
-        'or call cleanup() manually when needed.'
+          'Automatic cleanup will never run. Please set cleanupInterval to enable it, ' +
+          'or call cleanup() manually when needed.'
       )
     }
     // 反向情况：设置了 cleanupInterval 但没有配置任何清理规则
@@ -51,7 +55,7 @@ export class ConfigManager {
     if (options.cleanupInterval && !options.maxRecords && !options.retentionTime) {
       console.warn(
         '[IndexedDBStorage] cleanupInterval is set but neither maxRecords nor retentionTime is provided. ' +
-        'No cleanup will run. Set at least one of maxRecords or retentionTime.'
+          'No cleanup will run. Set at least one of maxRecords or retentionTime.'
       )
     }
     // storeConfig.storeName 必须与 options.storeName 完全一致：
@@ -61,7 +65,7 @@ export class ConfigManager {
     if (storeConfig && storeConfig.storeName !== options.storeName) {
       throw new Error(
         `storeConfig.storeName ("${storeConfig.storeName}") must match options.storeName ("${options.storeName}"). ` +
-        'The object store is identified by options.storeName; storeConfig.storeName must be the same.'
+          'The object store is identified by options.storeName; storeConfig.storeName must be the same.'
       )
     }
     this.storageOptions = options
@@ -116,5 +120,4 @@ export class ConfigManager {
       timestampIndexName,
     }
   }
-
 }

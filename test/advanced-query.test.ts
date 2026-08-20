@@ -70,7 +70,7 @@ describe('高级查询功能', () => {
       })
 
       expect(results.length).toBeGreaterThan(0)
-      expect(results.every((r) => r.department !== '工程')).toBe(true)
+      expect(results.every(r => r.department !== '工程')).toBe(true)
     })
 
     it('应该支持大于查询 (gt)', async () => {
@@ -78,7 +78,7 @@ describe('高级查询功能', () => {
         where: { field: 'age', operator: 'gt', value: 30 },
       })
 
-      expect(results.every((r) => r.age > 30)).toBe(true)
+      expect(results.every(r => r.age > 30)).toBe(true)
     })
 
     it('应该支持大于等于查询 (gte)', async () => {
@@ -86,7 +86,7 @@ describe('高级查询功能', () => {
         where: { field: 'age', operator: 'gte', value: 30 },
       })
 
-      expect(results.every((r) => r.age >= 30)).toBe(true)
+      expect(results.every(r => r.age >= 30)).toBe(true)
     })
 
     it('应该支持小于查询 (lt)', async () => {
@@ -94,7 +94,7 @@ describe('高级查询功能', () => {
         where: { field: 'age', operator: 'lt', value: 25 },
       })
 
-      expect(results.every((r) => r.age < 25)).toBe(true)
+      expect(results.every(r => r.age < 25)).toBe(true)
     })
 
     it('应该支持小于等于查询 (lte)', async () => {
@@ -102,7 +102,7 @@ describe('高级查询功能', () => {
         where: { field: 'salary', operator: 'lte', value: 8000 },
       })
 
-      expect(results.every((r) => r.salary <= 8000)).toBe(true)
+      expect(results.every(r => r.salary <= 8000)).toBe(true)
     })
 
     it('应该支持范围查询 (between)', async () => {
@@ -110,12 +110,12 @@ describe('高级查询功能', () => {
         where: { field: 'age', operator: 'between', value: [25, 30] },
       })
 
-      expect(results.every((r) => r.age >= 25 && r.age <= 30)).toBe(true)
+      expect(results.every(r => r.age >= 25 && r.age <= 30)).toBe(true)
     })
 
     it('between 端点为 NaN 时应返回空结果并输出 warn', async () => {
       // NaN 端点无法参与有意义的范围比较，应触发 warn 并对所有记录返回 false
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const results = await storage.query({
         where: { field: 'age', operator: 'between', value: [NaN, 30] },
       })
@@ -129,50 +129,42 @@ describe('高级查询功能', () => {
 
     it('gt/lt compareValue 为 NaN 时应返回空结果并输出 warn', async () => {
       // NaN 作为比较基准无意义，应触发 warn 而非静默让所有记录匹配失败
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const gtResults = await storage.query({
         where: { field: 'age', operator: 'gt', value: NaN },
       })
       expect(gtResults).toHaveLength(0)
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('"gt" operator received NaN')
-      )
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"gt" operator received NaN'))
       warnSpy.mockClear()
 
       const ltResults = await storage.query({
         where: { field: 'age', operator: 'lt', value: NaN },
       })
       expect(ltResults).toHaveLength(0)
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('"lt" operator received NaN')
-      )
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"lt" operator received NaN'))
       warnSpy.mockRestore()
     })
 
     it('gte/lte compareValue 为 NaN 时应返回空结果并输出 warn', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
       const gteResults = await storage.query({
         where: { field: 'age', operator: 'gte', value: NaN },
       })
       expect(gteResults).toHaveLength(0)
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('"gte" operator received NaN')
-      )
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"gte" operator received NaN'))
       warnSpy.mockClear()
 
       const lteResults = await storage.query({
         where: { field: 'age', operator: 'lte', value: NaN },
       })
       expect(lteResults).toHaveLength(0)
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('"lte" operator received NaN')
-      )
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"lte" operator received NaN'))
       warnSpy.mockRestore()
     })
 
     it('contains/startsWith/endsWith compareValue 为 NaN 时应返回空结果并输出 warn', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
       const containsResults = await storage.query({
         where: { field: 'name', operator: 'contains', value: NaN },
@@ -204,7 +196,7 @@ describe('高级查询功能', () => {
 
     it('between 倒置区间（min > max）时应返回空结果并输出 warn', async () => {
       // 传入 [35, 25] 而非 [25, 35]，常见的参数顺序错误，应 warn 而非静默返回空
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const results = await storage.query({
         where: { field: 'age', operator: 'between', value: [35, 25] },
       })
@@ -217,7 +209,7 @@ describe('高级查询功能', () => {
     })
 
     it('in 的 compareValue 非数组时应返回空结果并输出 warn', async () => {
-      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => { })
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
       const results = await storage.query({
         where: { field: 'age', operator: 'in', value: 30 },
       })
@@ -234,7 +226,7 @@ describe('高级查询功能', () => {
         where: { field: 'department', operator: 'in', value: ['工程', '产品'] },
       })
 
-      expect(results.every((r) => ['工程', '产品'].includes(r.department))).toBe(true)
+      expect(results.every(r => ['工程', '产品'].includes(r.department))).toBe(true)
     })
 
     it('应该支持字符串包含查询 (contains)', async () => {
@@ -243,7 +235,7 @@ describe('高级查询功能', () => {
       })
 
       expect(results.length).toBeGreaterThan(0)
-      expect(results.every((r) => r.name.includes('李'))).toBe(true)
+      expect(results.every(r => r.name.includes('李'))).toBe(true)
     })
 
     it('应该支持字符串开头查询 (startsWith)', async () => {
@@ -271,7 +263,7 @@ describe('高级查询功能', () => {
         ],
       })
 
-      expect(results.every((r) => r.age > 25 && r.department === '工程')).toBe(true)
+      expect(results.every(r => r.age > 25 && r.department === '工程')).toBe(true)
     })
   })
 
@@ -323,19 +315,19 @@ describe('高级查询功能', () => {
   describe('自定义过滤', () => {
     it('应该支持自定义过滤函数', async () => {
       const results = await storage.query({
-        filter: (item) => item.age % 2 === 0 && item.salary > 8000,
+        filter: item => item.age % 2 === 0 && item.salary > 8000,
       })
 
-      expect(results.every((r) => r.age % 2 === 0 && r.salary > 8000)).toBe(true)
+      expect(results.every(r => r.age % 2 === 0 && r.salary > 8000)).toBe(true)
     })
 
     it('应该支持 where 和 filter 组合', async () => {
       const results = await storage.query({
         where: { field: 'department', operator: 'eq', value: '工程' },
-        filter: (item) => item.salary > 8000,
+        filter: item => item.salary > 8000,
       })
 
-      expect(results.every((r) => r.department === '工程' && r.salary > 8000)).toBe(true)
+      expect(results.every(r => r.department === '工程' && r.salary > 8000)).toBe(true)
     })
   })
 
@@ -348,7 +340,7 @@ describe('高级查询功能', () => {
       })
 
       expect(results).toHaveLength(3)
-      expect(results.every((r) => r.age >= 25)).toBe(true)
+      expect(results.every(r => r.age >= 25)).toBe(true)
 
       // 验证降序排序
       for (let i = 1; i < results.length; i++) {
@@ -360,14 +352,14 @@ describe('高级查询功能', () => {
       const results = await storage.query({
         where: { field: 'department', operator: 'in', value: ['工程', '产品'] },
         sort: { field: 'age', order: 'asc' },
-        filter: (item) => item.salary >= 8500,
+        filter: item => item.salary >= 8500,
         limit: 5,
         offset: 1,
       })
 
       expect(results.length).toBeLessThanOrEqual(5)
-      expect(results.every((r) => ['工程', '产品'].includes(r.department))).toBe(true)
-      expect(results.every((r) => r.salary >= 8500)).toBe(true)
+      expect(results.every(r => ['工程', '产品'].includes(r.department))).toBe(true)
+      expect(results.every(r => r.salary >= 8500)).toBe(true)
     })
   })
 
@@ -389,9 +381,9 @@ describe('高级查询功能', () => {
       expect(page2).toHaveLength(3)
 
       // 确保没有重复
-      const ids1 = page1.map((r) => r.id)
-      const ids2 = page2.map((r) => r.id)
-      expect(ids1.some((id) => ids2.includes(id))).toBe(false)
+      const ids1 = page1.map(r => r.id)
+      const ids2 = page2.map(r => r.id)
+      expect(ids1.some(id => ids2.includes(id))).toBe(false)
     })
   })
 })

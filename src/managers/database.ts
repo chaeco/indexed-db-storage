@@ -9,9 +9,10 @@ import type { StoreConfig } from '../types/index'
  */
 function getIndexedDB(): IDBFactory {
   // globalThis 在所有目标环境（浏览器、Worker、Node ≥ 14）中始终存在，无需 typeof 检查
-  const idb = 'indexedDB' in globalThis
-    ? (globalThis as typeof globalThis & { indexedDB: IDBFactory }).indexedDB
-    : undefined
+  const idb =
+    'indexedDB' in globalThis
+      ? (globalThis as typeof globalThis & { indexedDB: IDBFactory }).indexedDB
+      : undefined
 
   if (!idb) {
     throw new Error('IndexedDB is not supported in this environment.')
@@ -65,7 +66,7 @@ export async function initDatabase(dbName: string, storeConfig: StoreConfig): Pr
         reject(
           new Error(
             `Database "${dbName}" upgrade to v${nextVersion} is blocked. ` +
-            'Close all other tabs or connections to this database and retry.'
+              'Close all other tabs or connections to this database and retry.'
           )
         )
       }

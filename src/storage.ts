@@ -60,7 +60,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
       if (storeConfig) {
         console.warn(
           `[IndexedDBStorage] An instance for dbName="${options.dbName}" storeName="${options.storeName}" already exists. ` +
-          'The new storeConfig will be ignored. Call destroy() first if you need to reconfigure.'
+            'The new storeConfig will be ignored. Call destroy() first if you need to reconfigure.'
         )
       }
       return existing as this

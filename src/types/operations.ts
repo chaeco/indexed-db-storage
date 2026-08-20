@@ -6,17 +6,17 @@
  * 查询条件操作符
  */
 export type QueryOperator =
-  | 'eq'      // 等于
-  | 'ne'      // 不等于
-  | 'gt'      // 大于
-  | 'gte'     // 大于等于
-  | 'lt'      // 小于
-  | 'lte'     // 小于等于
+  | 'eq' // 等于
+  | 'ne' // 不等于
+  | 'gt' // 大于
+  | 'gte' // 大于等于
+  | 'lt' // 小于
+  | 'lte' // 小于等于
   | 'between' // 在范围内
-  | 'in'      // 在数组中
-  | 'contains'// 包含（字符串）
+  | 'in' // 在数组中
+  | 'contains' // 包含（字符串）
   | 'startsWith' // 开头匹配（字符串）
-  | 'endsWith'   // 结尾匹配（字符串）
+  | 'endsWith' // 结尾匹配（字符串）
 
 /**
  * 单个查询条件

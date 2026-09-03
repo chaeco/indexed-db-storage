@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0] - 2026-09-03
+
+### Added
+
+- **Bulk operations** — `bulkAdd(items)` / `bulkPut(items)` / `bulkDelete(keys)` run in a single transaction (all-or-nothing); N records cost one transaction instead of N. `getMany(keys)` batch-reads in one transaction (`undefined` for missing keys).
+- **Atomic transactions** — `runInTransaction(mode, scope)` shares one `IDBTransaction` across a scoped operation set (`get`/`getMany`/`save`/`update`/`bulkAdd`/`bulkPut`/`delete`/`bulkDelete`/`count`/`query`); any failure rolls back everything. Scoped writes are emitted as `onWrite` events only after the transaction commits. Note: awaiting non-IDB async inside the scope lets the transaction auto-commit (spec behavior).
+- **Keyset pagination** — `query()` accepts `after`/`before` key cursors (mutually exclusive with `range`) for infinite-scroll paging without offset scan cost; `before` + `direction: 'prev'` supports descending pages.
+- **Streaming & bulk delete** — `iterate(onItem, options)` streams records through a cursor (return `false` to stop, memory-safe for large exports); `deleteMany(options)` deletes by query conditions in one transaction and returns the number deleted (`sort` + `limit` enables "delete oldest N").
+- **Keys-only queries** — `queryKeys(options)` returns primary keys without deserializing record values.
+- **Cross-tab write events** — `onWrite(listener)` subscribes to write events (`add`/`put`/`delete`/`bulkAdd`/`bulkPut`/`bulkDelete`/`clear`) from this tab and other tabs via `BroadcastChannel`; returns an unsubscribe function.
+- **Storage quota & persistence** — static `requestPersistence()` / `isPersistent()` / `estimate()` wrappers (return `null` when unsupported).
+- **Typed `filter`** — `QueryOptions<T>` is now generic, so `filter` callbacks receive the typed record instead of an implicit `any`.
+
+### Optimized
+
+- **Index-driven queries (Dexie-style)** — the first range-compatible `where` condition (`eq`/`gt`/`gte`/`lt`/`lte`/`between`) whose field maps to an index or inline primary key is compiled to `IDBKeyRange` and pushed down to the cursor source; scan cost drops from O(all records) to O(matches). Invalid keys (NaN/objects/…) safely fall back to JS filtering.
+- **Index-aware sorting** — single-field sorts on an indexed field traverse the index cursor directly (`advance(offset)` + early termination at `limit`) instead of collecting and sorting in memory.
+- **Bounded `getAll`** — `limit` on the getAll path now uses `getAll(range, offset + limit)` to cap fetched records.
+- **Hot-loop precompilation** — `where` conditions are compiled (array-normalized, paths split) once per query instead of per cursor record.
+
+### Fixed
+
+- **Index schema upgrades were silently ignored** — adding or changing an index in `StoreConfig` for an existing store never took effect; `initDatabase` now diffs the store's indexes against the config on every open and bumps the version to create new indexes or rebuild changed ones (keyPath/unique/multiEntry).
+- **`versionchange` yielded nothing** — connections now auto-close on `versionchange` (Dexie's default) so another tab's upgrade is no longer blocked forever; the instance clears its stale connection reference and reports "not initialized" on next use.
+- **Compound `keyPath` + `where` crashed** — querying a single member of an array keyPath threw `NotFoundError` instead of falling back to a full scan.
+- **`indexName` + `range` + `where` combination** — the index-driven path no longer takes over the cursor source when the caller explicitly passes `indexName` (the range is bound to that index).
+- **`queryKeys` contract** — always returns primary keys (spec: `IDBIndex.getAllKeys()` returns primary keys); the where path no longer lets index pushdown silently change the key type.
+
 ## [0.0.6] - 2026-08-19
 
 ### Changed

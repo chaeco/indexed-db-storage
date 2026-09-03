@@ -9,7 +9,13 @@
 
 - 🎯 **通用存储** - 支持任意数据类型，不限于特定场景
 
-- 🔍 **强大查询** - 支持 where 条件、多字段排序、自定义过滤等高级查询
+- 🔍 **强大查询** - 支持 where 条件、多字段排序、自定义过滤等高级查询；范围条件自动编译为 `IDBKeyRange` 下推到索引（Dexie 式优化）
+
+- ⚡ **批量与原子操作** - `bulkAdd`/`bulkPut`/`bulkDelete` 单事务批量读写，`runInTransaction` 原子事务
+
+- 📄 **高效分页** - keyset 分页（`after`/`before`），无限滚动不受 offset 性能惩罚
+
+- 🔔 **跨标签页事件** - `onWrite` 订阅写入事件，基于 BroadcastChannel 跨标签页同步
 
 - 🔒 **类型安全** - 完整的 TypeScript 泛型支持
 
@@ -17,13 +23,13 @@
 
 - 🧹 **自动清理** - 可配置的数据清理机制（按时间/数量）
 
-- ⚙️ **灵活配置** - 自定义 keyPath、索引等数据库配置
+- ⚙️ **灵活配置** - 自定义 keyPath、索引等数据库配置；已有 store 的新增/变更索引会在下次 `init()` 时自动升级
 
 - 📦 **零依赖** - 无外部依赖，轻量级设计
 
 - 🚀 **现代化** - 基于 Promise 的异步 API
 
-- ✅ **测试完善** - 90 个测试用例，全量覆盖核心逻辑和边界情况
+- ✅ **测试完善** - 157 个测试用例，全量覆盖核心逻辑和边界情况
 
 ## 安装
 
@@ -354,7 +360,11 @@ new IndexedDBStorage<T>(options: StorageOptions, storeConfig?: StoreConfig)
 
 - `range` (IDBKeyRange) - 查询范围
 
-- `direction` (IDBCursorDirection) - 游标遍历方向（**仅在同时提供 `where` 或 `filter` 时生效**，否则走 getAll 路径，该选项被忽略并输出警告）
+- `after` (IDBValidKey) - keyset 分页：从该键之后开始遍历（不含该键）。作用于主键或 `indexName` 索引键。**与 `range` 互斥**
+
+- `before` (IDBValidKey) - keyset 分页：遍历到该键之前结束（不含该键）。配合 `direction: 'prev'` 可实现降序翻页
+
+- `direction` (IDBCursorDirection) - 游标遍历方向（**仅在同时提供 `where` 或 `filter`、或使用 `after`/`before` 时生效**，否则走 getAll 路径，该选项被忽略并输出警告）
 
 - `where` (WhereCondition | WhereCondition[]) - 查询条件（支持多条件，AND 语义）
 
@@ -392,6 +402,53 @@ new IndexedDBStorage<T>(options: StorageOptions, storeConfig?: StoreConfig)
 
 获取记录总数。
 
+#### `async bulkAdd(items: T[]): Promise<IDBValidKey[]>`
+
+批量插入（单事务，全有或全无）。任一记录写入失败时整个批次回滚并以首个错误 reject。返回与输入顺序一致的主键数组。
+
+#### `async bulkPut(items: T[]): Promise<IDBValidKey[]>`
+
+批量 upsert（单事务，全有或全无）。返回主键数组。
+
+#### `async bulkDelete(keys: IDBValidKey[]): Promise<number>`
+
+批量删除（单事务）。返回实际删除的记录数（删除不存在的 key 不算错误）。
+
+#### `async getMany(keys: IDBValidKey[]): Promise<(T | undefined)[]>`
+
+批量获取（单事务）。结果与输入顺序一致，不存在的 key 对应 `undefined`。
+
+#### `async iterate(onItem, options?): Promise<number>`
+
+流式遍历：游标逐条回调，不在内存中累积全量结果，适合大数据量导出/批处理。`onItem(item, key)` 的 `key` 为记录主键，返回 `false` 可提前终止。不支持 `sort`。
+
+#### `async deleteMany(options?): Promise<number>`
+
+按查询条件批量删除（单事务），支持全部 QueryOptions（`sort`+`limit` 可实现"删除最旧的 N 条"）。不带条件时等价于 `clear()`。返回实际删除数。
+
+#### `async queryKeys(options?): Promise<IDBValidKey[]>`
+
+只查询键、不反序列化记录值，适合存在性检查/批量取 ID。始终返回记录主键。不支持 `sort`。
+
+#### `onWrite(listener): () => void`
+
+订阅写入事件（本地写入 + 其他标签页经 BroadcastChannel 同步的写入）。返回取消订阅函数。
+
+事件结构：`{ storeName, type: 'add' | 'put' | 'delete' | 'bulkAdd' | 'bulkPut' | 'bulkDelete' | 'clear', keys?, source: 'local' | 'remote' }`
+
+#### `async runInTransaction<R>(mode, scope): Promise<R>`
+
+在单个事务中原子执行一组操作。scope 接收共享同一事务的操作集（`get`/`getMany`/`save`/`update`/`bulkAdd`/`bulkPut`/`delete`/`bulkDelete`/`count`/`query`），任何失败都会回滚全部写入。
+
+⚠️ scope 内只允许 await IndexedDB 请求；await 非 IDB 异步操作（fetch/setTimeout 等）会导致事务自动提交（IndexedDB 规范行为），后续请求将抛出 InvalidStateError。
+
+```typescript
+await storage.runInTransaction('readwrite', async tx => {
+  await tx.save(order)
+  await tx.update(inventory)
+})
+```
+
 #### `async cleanup(): Promise<void>`
 
 手动触发清理操作。
@@ -413,6 +470,18 @@ new IndexedDBStorage<T>(options: StorageOptions, storeConfig?: StoreConfig)
 #### `static clearInstance(options?: StorageOptions): void`
 
 清除指定的实例缓存。不传参数则清除所有实例。
+
+#### `static async requestPersistence(): Promise<boolean | null>`
+
+请求将当前源（origin）标记为持久化存储，降低浏览器在存储压力下驱逐数据的概率。对 Safari ITP 的"7 天不活跃清除"无效。环境不支持时返回 `null`。
+
+#### `static async isPersistent(): Promise<boolean | null>`
+
+查询当前源是否已被标记为持久化存储。环境不支持时返回 `null`。
+
+#### `static async estimate(): Promise<StorageEstimate | null>`
+
+查询当前源的存储配额与用量（origin 级别，非单库）。环境不支持时返回 `null`。
 
 ## 📁 项目结构
 

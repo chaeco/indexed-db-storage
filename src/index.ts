@@ -19,6 +19,8 @@ export type {
   QueryOptions,
   // 存储类型
   IStorage,
+  ITransactionScope,
+  StorageWriteEvent,
   // 向后兼容别名
   StorageOptions as IndexedDBStorageOptions,
   QueryOptions as IndexedDBQueryOptions,

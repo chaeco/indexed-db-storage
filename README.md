@@ -10,14 +10,17 @@ A universal IndexedDB storage solution providing powerful persistent storage cap
 ## ✨ Features
 
 - 🎯 **Universal Storage** - Supports any data type, not limited to specific scenarios.
-- 🔍 **Powerful Querying** - Supports `where` conditions, multi-field sorting, custom filtering, and complex range queries.
+- 🔍 **Powerful Querying** - Supports `where` conditions, multi-field sorting, custom filtering, and complex range queries. Range conditions are compiled to `IDBKeyRange` and pushed down to indexes (Dexie-style) whenever possible.
+- ⚡ **Bulk & Atomic Operations** - `bulkAdd`/`bulkPut`/`bulkDelete` in a single transaction, plus `runInTransaction` for atomic multi-step writes.
+- 📄 **Efficient Pagination** - Keyset pagination (`after`/`before`) for infinite scroll without the offset penalty.
+- 🔔 **Cross-Tab Events** - `onWrite` subscription with BroadcastChannel-based sync across tabs.
 - 🔒 **Type Safe** - Full TypeScript generic support for robust data handling.
 - 🔄 **Singleton Pattern** - Automatically manages instances based on `dbName` + `storeName` combinations, reusing connections for identical configurations.
 - 🧹 **Auto Cleanup** - Configurable data retention mechanisms based on capacity or age.
-- ⚙️ **Flexible Configuration** - Customize `keyPath`, indexes, and other database settings.
+- ⚙️ **Flexible Configuration** - Customize `keyPath`, indexes, and other database settings. New or changed index definitions are applied automatically on the next `init()`.
 - 📦 **Zero Dependencies** - Lightweight design with no external dependencies.
 - 🚀 **Modern API** - Promise-based asynchronous API for seamless integration with `async/await`.
-- ✅ **Well Tested** - 90 test cases with extensive coverage of core logic and edge cases.
+- ✅ **Well Tested** - 157 test cases with extensive coverage of core logic and edge cases.
 
 ## Installation
 
@@ -188,6 +191,88 @@ const results = await storage.query({
 ```
 
 For more details, see the [Advanced Query Documentation](./docs/advanced-query.md).
+
+### Bulk Operations
+
+```typescript
+// Insert many records in ONE transaction (all-or-nothing)
+const keys = await storage.bulkAdd(users)
+
+// Upsert many records in ONE transaction
+await storage.bulkPut(users)
+
+// Delete many records by key, returns the number actually deleted
+const deleted = await storage.bulkDelete([1, 2, 3])
+
+// Batch read in one transaction; missing keys map to undefined
+const found = await storage.getMany([1, 2, 3])
+```
+
+### Atomic Transactions
+
+```typescript
+// All writes share one IDBTransaction — any failure rolls back everything.
+// Note: only await IDB requests inside the scope (see JSDoc for details).
+await storage.runInTransaction('readwrite', async tx => {
+  await tx.save(order)
+  await tx.update(inventory)
+})
+```
+
+### Keyset Pagination (infinite scroll)
+
+```typescript
+// First page
+const page1 = await storage.query({ limit: 20 })
+
+// Next page — no offset scan cost, constant per page
+const page2 = await storage.query({ after: page1[page1.length - 1].id, limit: 20 })
+
+// Previous page (descending)
+const prev = await storage.query({
+  before: page1[0].id,
+  direction: 'prev',
+  limit: 20,
+})
+```
+
+### Streaming Iteration & Bulk Delete by Query
+
+```typescript
+// Stream through all records without loading everything into memory
+await storage.iterate((user, key) => {
+  console.log(user.name, key)
+})
+
+// Delete by condition in one transaction (e.g. purge a conversation)
+await storage.deleteMany({ where: { field: 'channelId', operator: 'eq', value: channelId } })
+
+// Keys-only queries (no value deserialization)
+const ids = await storage.queryKeys({ where: { field: 'active', operator: 'eq', value: true } })
+```
+
+### Cross-Tab Write Events
+
+```typescript
+// Fires for local writes and writes from other tabs (BroadcastChannel)
+const off = storage.onWrite(event => {
+  // event: { storeName, type, keys?, source: 'local' | 'remote' }
+  refreshUI()
+})
+
+// Stop listening
+off()
+```
+
+### Storage Quota & Persistence
+
+```typescript
+// Ask the browser to keep this origin's storage (best-effort)
+await IndexedDBStorage.requestPersistence()
+
+// Origin-level quota usage
+const { usage, quota } = (await IndexedDBStorage.estimate()) ?? {}
+```
 
 ## License
 

@@ -50,8 +50,10 @@ export interface SortOption {
 
 /**
  * 查询选项
+ *
+ * @typeParam T 记录类型。用于 `filter` 回调的元素类型推导。
  */
-export interface QueryOptions {
+export interface QueryOptions<T = unknown> {
   /**
    * 返回数量限制。
    *
@@ -67,6 +69,19 @@ export interface QueryOptions {
   indexName?: string
   /** 查询范围 */
   range?: IDBKeyRange
+  /**
+   * keyset 分页游标：从该键之后开始遍历（不含该键）。
+   * 作用于主键（未指定 `indexName` 时）或 `indexName` 指定的索引键。
+   * 与 `range` 互斥，同时提供将抛出错误。
+   * 典型用法：把上一页最后一条记录的主键作为下一页的 `after`，
+   * 避免 offset 分页越翻越慢的问题。
+   */
+  after?: IDBValidKey
+  /**
+   * keyset 分页游标：遍历到该键之前结束（不含该键）。语义同 {@link QueryOptions.after}。
+   * 配合 `direction: 'prev'` 可实现降序翻页（此时会走游标路径而非 getAll）。
+   */
+  before?: IDBValidKey
   /**
    * 游标遍历方向。
    * 仅在游标路径下有效（即存在 `where` 或 `filter` 条件时）。
@@ -84,5 +99,5 @@ export interface QueryOptions {
    * Promise 将以 `"Transaction aborted"` 拒绝，而非原始异常。
    * 请确保过滤函数内部不会抛出，或在函数内部自行 `try/catch`。
    */
-  filter?: <T>(item: T) => boolean
+  filter?: (item: T) => boolean
 }

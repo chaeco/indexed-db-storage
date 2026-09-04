@@ -11,9 +11,30 @@ import { openStore, resolveStore } from '../utils/idb'
  */
 function reqToPromise<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
-    request.onerror = () => reject(request.error)
+    request.onerror = () => reject(wrapCloneError(request.error, '写入'))
     request.onsuccess = () => resolve(request.result)
   })
+}
+
+/**
+ * 结构化克隆失败（DataCloneError）的友好化包装。
+ *
+ * 真实场景：Vue 的 reactive() proxy 等无法被 IndexedDB structured clone，
+ * 浏览器原始报错几乎无法定位原因——补充明确的修复指引，
+ * 并通过 cause 保留原始错误。其他错误原样返回。
+ */
+function wrapCloneError(err: unknown, op: string): unknown {
+  if (err && typeof err === 'object' && (err as { name?: string }).name === 'DataCloneError') {
+    const wrapped = new Error(
+      `[IndexedDBStorage] ${op} 失败：该值无法被 structured clone 写入 IndexedDB。\n` +
+        '常见原因：传入了 Vue reactive()/ref().value 的 Proxy 等不可克隆对象。\n' +
+        '修复：写入前转换为普通对象（如 Vue 的 toRaw(value) 或 JSON.parse(JSON.stringify(value))）。' +
+        '注意：Date/Map/Set/TypedArray/ArrayBuffer 均可克隆，无需转换。'
+    )
+    ;(wrapped as Error & { cause?: unknown }).cause = err
+    return wrapped
+  }
+  return err
 }
 
 /**
@@ -27,7 +48,12 @@ export function saveData<T>(
 ): Promise<IDBValidKey> {
   return new Promise((resolve, reject) => {
     const store = resolveStore(db, storeName, 'readwrite', reject, tx)
-    resolve(reqToPromise(store.add(data)))
+    try {
+      resolve(reqToPromise(store.add(data)))
+    } catch (err) {
+      // structured clone 在请求创建时同步进行，克隆失败在此抛出
+      reject(wrapCloneError(err, 'save()'))
+    }
   })
 }
 
@@ -44,7 +70,11 @@ export function updateData<T>(
 ): Promise<IDBValidKey> {
   return new Promise((resolve, reject) => {
     const store = resolveStore(db, storeName, 'readwrite', reject, tx)
-    resolve(reqToPromise(store.put(data)))
+    try {
+      resolve(reqToPromise(store.put(data)))
+    } catch (err) {
+      reject(wrapCloneError(err, 'update()'))
+    }
   })
 }
 
@@ -72,8 +102,9 @@ export function bulkAddData<T>(
     // 以每个请求的成功/失败作为完成信号
     const store = tx.objectStore(storeName)
     const keys: IDBValidKey[] = new Array(items.length)
-    return Promise.all(
-      items.map(
+    let requests: Promise<void>[]
+    try {
+      requests = items.map(
         (item, i) =>
           new Promise<void>((res, rej) => {
             const request = store.add(item)
@@ -81,24 +112,39 @@ export function bulkAddData<T>(
               keys[i] = request.result
               res()
             }
-            request.onerror = () => rej(request.error)
+            request.onerror = () => rej(wrapCloneError(request.error, 'bulkAdd()'))
           })
       )
-    ).then(() => keys)
+    } catch (err) {
+      return Promise.reject(wrapCloneError(err, 'bulkAdd()'))
+    }
+    return Promise.all(requests).then(() => keys)
   }
 
   return new Promise((resolve, reject) => {
     const store = openStore(db, storeName, 'readwrite', reject)
     const keys: IDBValidKey[] = new Array(items.length)
 
-    items.forEach((item, i) => {
-      const request = store.add(item)
-      request.onsuccess = () => {
-        keys[i] = request.result
+    try {
+      items.forEach((item, i) => {
+        const request = store.add(item)
+        request.onsuccess = () => {
+          keys[i] = request.result
+        }
+        // onerror 不绑定：request 级失败会冒泡为事务 abort，由事务层 reject。
+        // 绑定并阻止冒泡会变成"跳过失败项继续写"，那是 bulkPut 的语义。
+      })
+    } catch (err) {
+      // 同步失败（如 structured clone 失败）：已入队的请求必须中止，
+      // 否则事务会带着前半批数据提交，违背"全有或全无"
+      try {
+        store.transaction.abort()
+      } catch {
+        // 事务已结束
       }
-      // onerror 不绑定：request 级失败会冒泡为事务 abort，由事务层 reject。
-      // 绑定并阻止冒泡会变成"跳过失败项继续写"，那是 bulkPut 的语义。
-    })
+      reject(wrapCloneError(err, 'bulkAdd()'))
+      return
+    }
 
     store.transaction.oncomplete = () => resolve(keys)
   })
@@ -123,8 +169,9 @@ export function bulkPutData<T>(
   if (tx) {
     const store = tx.objectStore(storeName)
     const keys: IDBValidKey[] = new Array(items.length)
-    return Promise.all(
-      items.map(
+    let requests: Promise<void>[]
+    try {
+      requests = items.map(
         (item, i) =>
           new Promise<void>((res, rej) => {
             const request = store.put(item)
@@ -132,22 +179,35 @@ export function bulkPutData<T>(
               keys[i] = request.result
               res()
             }
-            request.onerror = () => rej(request.error)
+            request.onerror = () => rej(wrapCloneError(request.error, 'bulkPut()'))
           })
       )
-    ).then(() => keys)
+    } catch (err) {
+      return Promise.reject(wrapCloneError(err, 'bulkPut()'))
+    }
+    return Promise.all(requests).then(() => keys)
   }
 
   return new Promise((resolve, reject) => {
     const store = openStore(db, storeName, 'readwrite', reject)
     const keys: IDBValidKey[] = new Array(items.length)
 
-    items.forEach((item, i) => {
-      const request = store.put(item)
-      request.onsuccess = () => {
-        keys[i] = request.result
+    try {
+      items.forEach((item, i) => {
+        const request = store.put(item)
+        request.onsuccess = () => {
+          keys[i] = request.result
+        }
+      })
+    } catch (err) {
+      try {
+        store.transaction.abort()
+      } catch {
+        // 事务已结束
       }
-    })
+      reject(wrapCloneError(err, 'bulkPut()'))
+      return
+    }
 
     store.transaction.oncomplete = () => resolve(keys)
   })

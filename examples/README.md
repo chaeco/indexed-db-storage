@@ -24,6 +24,7 @@ This directory contains examples of how to use `@chaeco/indexed-db-storage`.
    - Basic CRUD: [http://localhost:8000/examples/basic.html](http://localhost:8000/examples/basic.html)
    - Logger: [http://localhost:8000/examples/logger.html](http://localhost:8000/examples/logger.html)
    - Advanced Query: [http://localhost:8000/examples/advanced-query.html](http://localhost:8000/examples/advanced-query.html)
+   - Bulk & Transaction: [http://localhost:8000/examples/bulk-transaction.html](http://localhost:8000/examples/bulk-transaction.html)
 
 ### Method 2: Development Server
 
@@ -49,3 +50,10 @@ Demonstrates:
 - Multi-field sorting.
 - Pagination with `limit` and `offset`.
 - Nested field searching.
+
+### bulk-transaction.html - Bulk Operations & Transactions
+Demonstrates:
+- `bulkAdd` / `getMany` / `deleteMany` in single transactions.
+- `runInTransaction` with cross-store atomic writes (`forStore`) and rollback.
+- Keyset pagination (`after` cursor) for infinite scroll.
+- `onWrite` subscription (local + cross-tab) and `exportData` / `importData`.

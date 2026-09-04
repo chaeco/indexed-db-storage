@@ -15,11 +15,19 @@ export class CleanupManager {
   private cleanupTimer?: ReturnType<typeof setInterval>
   // 并发重入锁：save() 的 fire-and-forget 调用在上一轮未完成时直接跳过
   private isCleanupRunning = false
+  // 清理删除记录的回调（供上层发 onWrite 事件，UI 不再持有过期视图）
+  private onDeleted?: (keys: IDBValidKey[]) => void
 
-  constructor(db: IDBDatabase, storeName: string, config: CleanupConfig) {
+  constructor(
+    db: IDBDatabase,
+    storeName: string,
+    config: CleanupConfig,
+    onDeleted?: (keys: IDBValidKey[]) => void
+  ) {
     this.db = db
     this.storeName = storeName
     this.config = config
+    this.onDeleted = onDeleted
   }
 
   /** 启动清理定时器（幂等：重复调用不泄漏句柄） */
@@ -89,15 +97,18 @@ export class CleanupManager {
       // upperBound 闭区间：恰好到期的记录也删除，符合"过期即删"语义
       const range = IDBKeyRange.upperBound(expiredTime)
       const request = index.openCursor(range)
+      const deletedKeys: IDBValidKey[] = []
 
       request.onerror = () => reject(request.error)
 
       request.onsuccess = () => {
         const cursor = request.result
         if (cursor) {
+          deletedKeys.push(cursor.primaryKey)
           cursor.delete()
           cursor.continue()
         } else {
+          this.onDeleted?.(deletedKeys)
           resolve()
         }
       }
@@ -127,16 +138,19 @@ export class CleanupManager {
           // 默认 openCursor() 按主键升序遍历，即优先删除最早插入的记录（FIFO）
           const request = store.openCursor()
           let deleted = 0
+          const deletedKeys: IDBValidKey[] = []
 
           request.onerror = () => reject(request.error)
 
           request.onsuccess = () => {
             const cursor = request.result
             if (cursor && deleted < toDelete) {
+              deletedKeys.push(cursor.primaryKey)
               cursor.delete()
               deleted++
               cursor.continue()
             } else {
+              this.onDeleted?.(deletedKeys)
               resolve()
             }
           }

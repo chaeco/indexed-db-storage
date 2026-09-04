@@ -21,6 +21,11 @@ class ConfigManager {
                 throw new Error('StorageOptions.cleanupInterval must be a finite positive number (milliseconds).');
             }
         }
+        if (options.version !== undefined) {
+            if (!Number.isInteger(options.version) || options.version < 1) {
+                throw new Error('StorageOptions.version must be a positive integer.');
+            }
+        }
         if ((options.retentionTime || options.maxRecords) && !options.cleanupInterval) {
             console.warn('[IndexedDBStorage] retentionTime/maxRecords is set but cleanupInterval is missing. ' +
                 'Automatic cleanup will never run. Please set cleanupInterval to enable it, ' +
@@ -55,6 +60,12 @@ class ConfigManager {
             autoIncrement: true,
         });
     }
+    getOnUpgrade() {
+        return this.storageOptions.onUpgrade;
+    }
+    getTargetVersion() {
+        return this.storageOptions.version;
+    }
     getCleanupConfig() {
         const { maxRecords, retentionTime, cleanupInterval, timestampIndexName } = this.storageOptions;
         if (!cleanupInterval || (!maxRecords && !retentionTime)) {
@@ -78,7 +89,22 @@ function getIndexedDB() {
     }
     return idb;
 }
-async function initDatabase(dbName, storeConfig, onClose) {
+function runUpgradeHook(hook, event, db, tx) {
+    if (!hook)
+        return;
+    const result = hook({
+        oldVersion: event.oldVersion,
+        newVersion: event.newVersion ?? db.version,
+        tx,
+        db,
+    });
+    if (result && typeof result.then === 'function') {
+        result.catch(err => {
+            console.error('[IndexedDBStorage] onUpgrade hook rejected. If the upgrade transaction already committed, the migration did not apply:', err);
+        });
+    }
+}
+async function initDatabase(dbName, storeConfig, hooks, targetVersion) {
     return new Promise((resolve, reject) => {
         let idb;
         try {
@@ -90,39 +116,61 @@ async function initDatabase(dbName, storeConfig, onClose) {
         }
         const probeRequest = idb.open(dbName);
         probeRequest.onerror = () => reject(probeRequest.error);
-        probeRequest.onupgradeneeded = () => {
+        probeRequest.onupgradeneeded = event => {
             createObjectStore(probeRequest.result, storeConfig);
+            if (probeRequest.transaction) {
+                try {
+                    runUpgradeHook(hooks?.onUpgrade, event, probeRequest.result, probeRequest.transaction);
+                }
+                catch (err) {
+                    reject(err);
+                    return;
+                }
+            }
         };
         probeRequest.onsuccess = () => {
             const db = probeRequest.result;
             const changes = diffSchemaChanges(db, storeConfig);
-            if (!changes) {
-                attachVersionchangeHandler(db, dbName, onClose);
+            const hasVersionTarget = targetVersion !== undefined && targetVersion > db.version;
+            if (!changes && !hasVersionTarget) {
+                attachVersionchangeHandler(db, dbName, hooks?.onClose);
                 resolve(db);
                 return;
             }
-            const nextVersion = db.version + 1;
+            const nextVersion = changes
+                ? Math.max(db.version + 1, targetVersion ?? 0)
+                : targetVersion;
             db.close();
             const upgradeRequest = idb.open(dbName, nextVersion);
             upgradeRequest.onblocked = () => {
                 reject(new Error(`Database "${dbName}" upgrade to v${nextVersion} is blocked. ` +
                     'Close all other tabs or connections to this database and retry.'));
             };
-            upgradeRequest.onupgradeneeded = () => {
+            upgradeRequest.onupgradeneeded = event => {
                 const upgradedDb = upgradeRequest.result;
-                if (changes.createStore) {
-                    if (!upgradedDb.objectStoreNames.contains(storeConfig.storeName)) {
-                        createObjectStore(upgradedDb, storeConfig);
+                if (changes) {
+                    if (changes.createStore) {
+                        if (!upgradedDb.objectStoreNames.contains(storeConfig.storeName)) {
+                            createObjectStore(upgradedDb, storeConfig);
+                        }
                     }
-                    return;
+                    else if (upgradeRequest.transaction) {
+                        applyIndexChanges(upgradeRequest.transaction, storeConfig.storeName, changes.indexChanges);
+                    }
                 }
                 if (upgradeRequest.transaction) {
-                    applyIndexChanges(upgradeRequest.transaction, storeConfig.storeName, changes.indexChanges);
+                    try {
+                        runUpgradeHook(hooks?.onUpgrade, event, upgradedDb, upgradeRequest.transaction);
+                    }
+                    catch (err) {
+                        reject(err);
+                        return;
+                    }
                 }
             };
             upgradeRequest.onsuccess = () => {
                 const db = upgradeRequest.result;
-                attachVersionchangeHandler(db, dbName, onClose);
+                attachVersionchangeHandler(db, dbName, hooks?.onClose);
                 resolve(db);
             };
             upgradeRequest.onerror = () => reject(upgradeRequest.error);
@@ -195,11 +243,12 @@ function resolveStore(db, storeName, mode, reject, tx) {
 }
 
 class CleanupManager {
-    constructor(db, storeName, config) {
+    constructor(db, storeName, config, onDeleted) {
         this.isCleanupRunning = false;
         this.db = db;
         this.storeName = storeName;
         this.config = config;
+        this.onDeleted = onDeleted;
     }
     start() {
         if (this.cleanupTimer !== undefined)
@@ -251,14 +300,17 @@ class CleanupManager {
             const index = store.index(timestampIndexName);
             const range = IDBKeyRange.upperBound(expiredTime);
             const request = index.openCursor(range);
+            const deletedKeys = [];
             request.onerror = () => reject(request.error);
             request.onsuccess = () => {
                 const cursor = request.result;
                 if (cursor) {
+                    deletedKeys.push(cursor.primaryKey);
                     cursor.delete();
                     cursor.continue();
                 }
                 else {
+                    this.onDeleted?.(deletedKeys);
                     resolve();
                 }
             };
@@ -276,15 +328,18 @@ class CleanupManager {
                     const toDelete = count - targetCount;
                     const request = store.openCursor();
                     let deleted = 0;
+                    const deletedKeys = [];
                     request.onerror = () => reject(request.error);
                     request.onsuccess = () => {
                         const cursor = request.result;
                         if (cursor && deleted < toDelete) {
+                            deletedKeys.push(cursor.primaryKey);
                             cursor.delete();
                             deleted++;
                             cursor.continue();
                         }
                         else {
+                            this.onDeleted?.(deletedKeys);
                             resolve();
                         }
                     };
@@ -320,20 +375,41 @@ function clearAllInstances() {
 
 function reqToPromise(request) {
     return new Promise((resolve, reject) => {
-        request.onerror = () => reject(request.error);
+        request.onerror = () => reject(wrapCloneError(request.error, '写入'));
         request.onsuccess = () => resolve(request.result);
     });
+}
+function wrapCloneError(err, op) {
+    if (err && typeof err === 'object' && err.name === 'DataCloneError') {
+        const wrapped = new Error(`[IndexedDBStorage] ${op} 失败：该值无法被 structured clone 写入 IndexedDB。\n` +
+            '常见原因：传入了 Vue reactive()/ref().value 的 Proxy 等不可克隆对象。\n' +
+            '修复：写入前转换为普通对象（如 Vue 的 toRaw(value) 或 JSON.parse(JSON.stringify(value))）。' +
+            '注意：Date/Map/Set/TypedArray/ArrayBuffer 均可克隆，无需转换。');
+        wrapped.cause = err;
+        return wrapped;
+    }
+    return err;
 }
 function saveData(db, storeName, data, tx) {
     return new Promise((resolve, reject) => {
         const store = resolveStore(db, storeName, 'readwrite', reject, tx);
-        resolve(reqToPromise(store.add(data)));
+        try {
+            resolve(reqToPromise(store.add(data)));
+        }
+        catch (err) {
+            reject(wrapCloneError(err, 'save()'));
+        }
     });
 }
 function updateData(db, storeName, data, tx) {
     return new Promise((resolve, reject) => {
         const store = resolveStore(db, storeName, 'readwrite', reject, tx);
-        resolve(reqToPromise(store.put(data)));
+        try {
+            resolve(reqToPromise(store.put(data)));
+        }
+        catch (err) {
+            reject(wrapCloneError(err, 'update()'));
+        }
     });
 }
 function bulkAddData(db, storeName, items, tx) {
@@ -342,24 +418,42 @@ function bulkAddData(db, storeName, items, tx) {
     if (tx) {
         const store = tx.objectStore(storeName);
         const keys = new Array(items.length);
-        return Promise.all(items.map((item, i) => new Promise((res, rej) => {
-            const request = store.add(item);
-            request.onsuccess = () => {
-                keys[i] = request.result;
-                res();
-            };
-            request.onerror = () => rej(request.error);
-        }))).then(() => keys);
+        let requests;
+        try {
+            requests = items.map((item, i) => new Promise((res, rej) => {
+                const request = store.add(item);
+                request.onsuccess = () => {
+                    keys[i] = request.result;
+                    res();
+                };
+                request.onerror = () => rej(wrapCloneError(request.error, 'bulkAdd()'));
+            }));
+        }
+        catch (err) {
+            return Promise.reject(wrapCloneError(err, 'bulkAdd()'));
+        }
+        return Promise.all(requests).then(() => keys);
     }
     return new Promise((resolve, reject) => {
         const store = openStore(db, storeName, 'readwrite', reject);
         const keys = new Array(items.length);
-        items.forEach((item, i) => {
-            const request = store.add(item);
-            request.onsuccess = () => {
-                keys[i] = request.result;
-            };
-        });
+        try {
+            items.forEach((item, i) => {
+                const request = store.add(item);
+                request.onsuccess = () => {
+                    keys[i] = request.result;
+                };
+            });
+        }
+        catch (err) {
+            try {
+                store.transaction.abort();
+            }
+            catch {
+            }
+            reject(wrapCloneError(err, 'bulkAdd()'));
+            return;
+        }
         store.transaction.oncomplete = () => resolve(keys);
     });
 }
@@ -369,24 +463,42 @@ function bulkPutData(db, storeName, items, tx) {
     if (tx) {
         const store = tx.objectStore(storeName);
         const keys = new Array(items.length);
-        return Promise.all(items.map((item, i) => new Promise((res, rej) => {
-            const request = store.put(item);
-            request.onsuccess = () => {
-                keys[i] = request.result;
-                res();
-            };
-            request.onerror = () => rej(request.error);
-        }))).then(() => keys);
+        let requests;
+        try {
+            requests = items.map((item, i) => new Promise((res, rej) => {
+                const request = store.put(item);
+                request.onsuccess = () => {
+                    keys[i] = request.result;
+                    res();
+                };
+                request.onerror = () => rej(wrapCloneError(request.error, 'bulkPut()'));
+            }));
+        }
+        catch (err) {
+            return Promise.reject(wrapCloneError(err, 'bulkPut()'));
+        }
+        return Promise.all(requests).then(() => keys);
     }
     return new Promise((resolve, reject) => {
         const store = openStore(db, storeName, 'readwrite', reject);
         const keys = new Array(items.length);
-        items.forEach((item, i) => {
-            const request = store.put(item);
-            request.onsuccess = () => {
-                keys[i] = request.result;
-            };
-        });
+        try {
+            items.forEach((item, i) => {
+                const request = store.put(item);
+                request.onsuccess = () => {
+                    keys[i] = request.result;
+                };
+            });
+        }
+        catch (err) {
+            try {
+                store.transaction.abort();
+            }
+            catch {
+            }
+            reject(wrapCloneError(err, 'bulkPut()'));
+            return;
+        }
         store.transaction.oncomplete = () => resolve(keys);
     });
 }
@@ -1011,10 +1123,19 @@ class IndexedDBStorage {
         const generation = this._initGeneration;
         this.initPromise = (async () => {
             try {
-                const db = await initDatabase(this.config.getDbName(), this.config.getStoreConfig(), () => {
-                    if (this.db === db)
-                        this.db = null;
-                });
+                const db = await initDatabase(this.config.getDbName(), this.config.getStoreConfig(), {
+                    onClose: () => {
+                        if (this.db === db) {
+                            this.db = null;
+                            this.stopCleanupTimer();
+                            this.cleanupManager = undefined;
+                            this.init().catch((err) => {
+                                console.warn('[IndexedDBStorage] Auto re-init after versionchange failed:', err);
+                            });
+                        }
+                    },
+                    onUpgrade: this.config.getOnUpgrade(),
+                }, this.config.getTargetVersion());
                 if (this._initGeneration !== generation) {
                     db.close();
                     throw new Error('Database initialization was cancelled because close() was called concurrently.');
@@ -1031,7 +1152,7 @@ class IndexedDBStorage {
                 }
                 const cleanupConfig = this.config.getCleanupConfig();
                 if (cleanupConfig) {
-                    this.cleanupManager = new CleanupManager(this.db, this.config.getStoreName(), cleanupConfig);
+                    this.cleanupManager = new CleanupManager(this.db, this.config.getStoreName(), cleanupConfig, keys => this.emitWrite('cleanup', keys));
                     this.cleanupManager.start();
                 }
             }
@@ -1042,74 +1163,74 @@ class IndexedDBStorage {
         return this.initPromise;
     }
     async save(data) {
-        this.ensureInitialized();
+        await this.ensureReady();
         const key = await saveData(this.db, this.config.getStoreName(), data);
         this.emitWrite('add', [key]);
         this.maybeTriggerCleanup();
         return key;
     }
     async bulkAdd(items) {
-        this.ensureInitialized();
+        await this.ensureReady();
         const keys = await bulkAddData(this.db, this.config.getStoreName(), items);
         this.emitWrite('bulkAdd', keys);
         this.maybeTriggerCleanup();
         return keys;
     }
     async bulkPut(items) {
-        this.ensureInitialized();
+        await this.ensureReady();
         const keys = await bulkPutData(this.db, this.config.getStoreName(), items);
         this.emitWrite('bulkPut', keys);
         this.maybeTriggerCleanup();
         return keys;
     }
     async bulkDelete(keys) {
-        this.ensureInitialized();
+        await this.ensureReady();
         const deleted = await bulkDeleteData(this.db, this.config.getStoreName(), keys);
         this.emitWrite('bulkDelete', keys);
         return deleted;
     }
     async update(data) {
-        this.ensureInitialized();
+        await this.ensureReady();
         const key = await updateData(this.db, this.config.getStoreName(), data);
         this.emitWrite('put', [key]);
         return key;
     }
     async query(options) {
-        this.ensureInitialized();
+        await this.ensureReady();
         return queryData(this.db, this.config.getStoreName(), options);
     }
     async get(key) {
-        this.ensureInitialized();
+        await this.ensureReady();
         return getData(this.db, this.config.getStoreName(), key);
     }
     async delete(key) {
-        this.ensureInitialized();
+        await this.ensureReady();
         await deleteData(this.db, this.config.getStoreName(), key);
         this.emitWrite('delete', [key]);
     }
     async clear() {
-        this.ensureInitialized();
+        await this.ensureReady();
         await clearAllData(this.db, this.config.getStoreName());
         this.emitWrite('clear');
     }
     async count() {
-        this.ensureInitialized();
+        await this.ensureReady();
         return getCount(this.db, this.config.getStoreName());
     }
     async getMany(keys) {
-        this.ensureInitialized();
+        await this.ensureReady();
         return getManyData(this.db, this.config.getStoreName(), keys);
     }
     async iterate(onItem, options) {
-        this.ensureInitialized();
+        await this.ensureReady();
         return iterateData(this.db, this.config.getStoreName(), options, onItem);
     }
     async deleteMany(options) {
-        this.ensureInitialized();
+        await this.ensureReady();
         return deleteManyData(this.db, this.config.getStoreName(), options);
     }
     async queryKeys(options) {
-        this.ensureInitialized();
+        await this.ensureReady();
         return queryKeysData(this.db, this.config.getStoreName(), options);
     }
     onWrite(listener) {
@@ -1128,48 +1249,61 @@ class IndexedDBStorage {
             }
         });
     }
-    emitWrite(type, keys) {
-        const event = {
-            storeName: this.config.getStoreName(),
-            type,
-            keys,
-            source: 'local',
-        };
-        this.dispatchWrite(event);
+    emitWrite(type, keys, storeName = this.config.getStoreName()) {
+        if (storeName === this.config.getStoreName()) {
+            this.dispatchWrite({
+                storeName,
+                type,
+                keys,
+                source: 'local',
+            });
+        }
         if (this._writeChannel) {
             try {
                 this._writeChannel.postMessage({
-                    storeName: event.storeName,
-                    type: event.type,
-                    keys: event.keys,
+                    storeName,
+                    type,
+                    keys,
                 });
             }
             catch {
             }
         }
     }
-    async runInTransaction(mode, scope) {
-        this.ensureInitialized();
-        const tx = this.db.transaction([this.config.getStoreName()], mode);
-        const scopeObj = this.createTransactionScope(tx);
+    async runInTransaction(mode, scope, options) {
+        await this.ensureReady();
+        const db = this.db;
+        const ownStore = this.config.getStoreName();
+        const extraStores = options?.stores ?? [];
+        for (const name of extraStores) {
+            if (!db.objectStoreNames.contains(name)) {
+                throw new Error(`[IndexedDBStorage] runInTransaction: store "${name}" does not exist in database "${this.config.getDbName()}".`);
+            }
+        }
+        const storeNames = Array.from(new Set([ownStore, ...extraStores]));
+        const tx = db.transaction(storeNames, mode);
         const pendingWrites = [];
-        const trackWrite = (type) => {
-            return keys => {
-                pendingWrites.push({ type, keys });
-            };
+        const record = (storeName) => (type) => (keys) => {
+            pendingWrites.push({ storeName, type, keys });
         };
-        const scopedTx = {
-            get: scopeObj.get,
-            getMany: scopeObj.getMany,
-            count: scopeObj.count,
-            query: scopeObj.query,
-            save: data => scopeObj.save(data).then(key => (trackWrite('add')([key]), key)),
-            update: data => scopeObj.update(data).then(key => (trackWrite('put')([key]), key)),
-            bulkAdd: items => scopeObj.bulkAdd(items).then(keys => (trackWrite('bulkAdd')(keys), keys)),
-            bulkPut: items => scopeObj.bulkPut(items).then(keys => (trackWrite('bulkPut')(keys), keys)),
-            delete: key => scopeObj.delete(key).then(() => trackWrite('delete')([key])),
-            bulkDelete: keys => scopeObj.bulkDelete(keys).then(n => (trackWrite('bulkDelete')(keys), n)),
-        };
+        const makeScope = (storeName) => ({
+            get: key => getData(db, storeName, key, tx),
+            getMany: keys => getManyData(db, storeName, keys, tx),
+            save: data => saveData(db, storeName, data, tx).then(key => (record(storeName)('add')([key]), key)),
+            update: data => updateData(db, storeName, data, tx).then(key => (record(storeName)('put')([key]), key)),
+            bulkAdd: items => bulkAddData(db, storeName, items, tx).then(keys => (record(storeName)('bulkAdd')(keys), keys)),
+            bulkPut: items => bulkPutData(db, storeName, items, tx).then(keys => (record(storeName)('bulkPut')(keys), keys)),
+            delete: key => deleteData(db, storeName, key, tx).then(() => record(storeName)('delete')([key])),
+            bulkDelete: keys => bulkDeleteData(db, storeName, keys, tx).then(n => (record(storeName)('bulkDelete')(keys), n)),
+            count: () => getCount(db, storeName, tx),
+            query: opts => queryData(db, storeName, opts, tx),
+            forStore: (name) => {
+                if (!db.objectStoreNames.contains(name)) {
+                    throw new Error(`[IndexedDBStorage] forStore("${name}"): store does not exist in database "${this.config.getDbName()}".`);
+                }
+                return makeScope(name);
+            },
+        });
         let outcome = null;
         const settled = new Promise(resolve => {
             tx.oncomplete = () => resolve('complete');
@@ -1177,7 +1311,7 @@ class IndexedDBStorage {
             tx.onerror = () => resolve('abort');
         });
         try {
-            const value = await scope(scopedTx);
+            const value = await scope(makeScope(ownStore));
             outcome = { ok: true, value };
         }
         catch (err) {
@@ -1196,25 +1330,23 @@ class IndexedDBStorage {
             throw tx.error ?? new Error('Transaction aborted');
         }
         for (const write of pendingWrites) {
-            this.emitWrite(write.type, write.keys);
+            this.emitWrite(write.type, write.keys, write.storeName);
         }
         return outcome.value;
     }
-    createTransactionScope(tx) {
-        const db = this.db;
-        const storeName = this.config.getStoreName();
-        return {
-            get: key => getData(db, storeName, key, tx),
-            getMany: keys => getManyData(db, storeName, keys, tx),
-            save: data => saveData(db, storeName, data, tx),
-            update: data => updateData(db, storeName, data, tx),
-            bulkAdd: items => bulkAddData(db, storeName, items, tx),
-            bulkPut: items => bulkPutData(db, storeName, items, tx),
-            delete: key => deleteData(db, storeName, key, tx),
-            bulkDelete: keys => bulkDeleteData(db, storeName, keys, tx),
-            count: () => getCount(db, storeName, tx),
-            query: options => queryData(db, storeName, options, tx),
-        };
+    async exportData() {
+        await this.ensureReady();
+        return queryData(this.db, this.config.getStoreName());
+    }
+    async importData(items, options) {
+        await this.ensureReady();
+        if (options?.clearBefore) {
+            await clearAllData(this.db, this.config.getStoreName());
+        }
+        const keys = await bulkPutData(this.db, this.config.getStoreName(), items);
+        this.emitWrite('bulkPut', keys);
+        this.maybeTriggerCleanup();
+        return keys.length;
     }
     static async requestPersistence() {
         const storage = globalThis.navigator?.storage;
@@ -1270,10 +1402,15 @@ class IndexedDBStorage {
         this.close();
         removeInstance(this.config.getInstanceKey());
     }
-    ensureInitialized() {
-        if (!this.db) {
-            throw new Error('Database not initialized. Call init() first.');
+    async ensureReady() {
+        if (this.db)
+            return;
+        if (this.initPromise) {
+            await this.initPromise;
+            if (this.db)
+                return;
         }
+        throw new Error('Database not initialized. Call init() first.');
     }
 }
 

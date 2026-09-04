@@ -12,6 +12,7 @@ export type {
   StoreConfig,
   IndexConfig,
   CleanupConfig,
+  UpgradeContext,
   // 查询类型
   QueryOperator,
   WhereCondition,

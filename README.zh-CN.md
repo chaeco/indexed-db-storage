@@ -322,6 +322,10 @@ new IndexedDBStorage<T>(options: StorageOptions, storeConfig?: StoreConfig)
 
 - `timestampIndexName` (string, 可选) - 时间戳索引名称（用于 `retentionTime` 过期清理，默认为 `'timestamp'`）
 
+- `version` (number, 可选) - 目标 schema 版本（正整数）。配置后 `init()` 以 `max(当前版本, 该版本)` 打开：即使没有 schema 变更也会触发升级事件，供 `onUpgrade` 做纯数据迁移
+
+- `onUpgrade` ((ctx: UpgradeContext) => void | Promise<void>, 可选) - 版本升级迁移钩子：在升级事务内、索引 schema 变更应用之后执行，用于旧数据结构迁移；全新数据库（oldVersion === 0）时可用于种子数据。⚠️ ctx 内只允许 await IndexedDB 请求；同步抛错或迁移请求失败会中止升级并使 `init()` 拒绝
+
 `storeConfig` (StoreConfig, 可选):
 
 - `storeName` (string, 必填) - 对象存储名称
@@ -430,23 +434,33 @@ new IndexedDBStorage<T>(options: StorageOptions, storeConfig?: StoreConfig)
 
 只查询键、不反序列化记录值，适合存在性检查/批量取 ID。始终返回记录主键。不支持 `sort`。
 
+#### `async exportData(): Promise<T[]>`
+
+导出全部记录（备份 / 跨存储迁移）。内联 keyPath 存储可经 `importData` 无损恢复；out-of-line keys 存储导出的是值本身，键无法恢复。
+
+#### `async importData(items, options?): Promise<number>`
+
+导入记录（单事务 bulkPut 覆盖写，内联 keyPath 主键保留）。`options.clearBefore: true` 时先清空再导入（全量恢复）。返回写入条数。
+
 #### `onWrite(listener): () => void`
 
 订阅写入事件（本地写入 + 其他标签页经 BroadcastChannel 同步的写入）。返回取消订阅函数。
 
-事件结构：`{ storeName, type: 'add' | 'put' | 'delete' | 'bulkAdd' | 'bulkPut' | 'bulkDelete' | 'clear', keys?, source: 'local' | 'remote' }`
+事件结构：`{ storeName, type: 'add' | 'put' | 'delete' | 'bulkAdd' | 'bulkPut' | 'bulkDelete' | 'clear' | 'cleanup', keys?, source: 'local' | 'remote' }`。自动清理删除的数据会以 `cleanup` 类型发出。
 
-#### `async runInTransaction<R>(mode, scope): Promise<R>`
+#### `async runInTransaction<R>(mode, scope, options?): Promise<R>`
 
-在单个事务中原子执行一组操作。scope 接收共享同一事务的操作集（`get`/`getMany`/`save`/`update`/`bulkAdd`/`bulkPut`/`delete`/`bulkDelete`/`count`/`query`），任何失败都会回滚全部写入。
+在单个事务中原子执行一组操作。scope 接收共享同一事务的操作集（`get`/`getMany`/`save`/`update`/`bulkAdd`/`bulkPut`/`delete`/`bulkDelete`/`count`/`query`/`forStore`），任何失败都会回滚全部写入。
 
 ⚠️ scope 内只允许 await IndexedDB 请求；await 非 IDB 异步操作（fetch/setTimeout 等）会导致事务自动提交（IndexedDB 规范行为），后续请求将抛出 InvalidStateError。
 
+`options.stores` 可声明同库内其他 store，配合 `tx.forStore(name)` 实现跨 store 原子写入：
+
 ```typescript
-await storage.runInTransaction('readwrite', async tx => {
+await orders.runInTransaction('readwrite', async tx => {
   await tx.save(order)
-  await tx.update(inventory)
-})
+  await tx.forStore('stocks').put({ item: order.item, qty: 3 })
+}, { stores: ['stocks'] })
 ```
 
 #### `async cleanup(): Promise<void>`
@@ -537,6 +551,8 @@ src/
 - [basic.html](./examples/basic.html) - 基础 CRUD 操作
 
 - [logger.html](./examples/logger.html) - 日志系统示例
+
+- [bulk-transaction.html](./examples/bulk-transaction.html) - 批量操作、事务、keyset 分页、跨标签页事件
 
 ## 🔧 开发
 

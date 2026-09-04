@@ -441,13 +441,14 @@ describe('边界情况回归', () => {
 })
 
 describe('onversionchange 自动让位', () => {
-  it('其他连接请求更高版本时，本连接应自动关闭并清空内部引用', async () => {
+  it('其他连接升级版本时应自动让位并重连', async () => {
     const storage = new IndexedDBStorage<User>(
       { dbName: 'test-vc-db', storeName: 'users' },
       { storeName: 'users', keyPath: 'id', autoIncrement: true }
     )
     await storage.init()
-    expect((storage as unknown as { db: IDBDatabase | null }).db).not.toBeNull()
+    const oldDb = (storage as unknown as { db: IDBDatabase | null }).db
+    expect(oldDb).not.toBeNull()
 
     // 用原生 API 以更高版本打开同一数据库，触发已持有连接的 versionchange
     const upgradePromise = new Promise<IDBDatabase>((resolve, reject) => {
@@ -458,13 +459,14 @@ describe('onversionchange 自动让位', () => {
     })
     const newDb = await upgradePromise
 
-    // 等待 versionchange 事件分发
-    await new Promise(r => vi.waitFor(r))
-
-    // 旧连接已让位：内部 db 引用被清空，后续操作应报"未初始化"而非使用陈旧连接
-    expect((storage as unknown as { db: IDBDatabase | null }).db).toBeNull()
-    // save 是 async 方法，ensureInitialized 的同步 throw 表现为 rejected promise
-    await expect(storage.save({ name: 'x', age: 1, city: 'y' })).rejects.toThrow('not initialized')
+    // 让位后应自动以新版本重连（autoOpen 语义），后续操作无需手动 init
+    await vi.waitFor(async () => {
+      expect((storage as unknown as { db: IDBDatabase | null }).db).not.toBeNull()
+    })
+    const reconnectedDb = (storage as unknown as { db: IDBDatabase | null }).db!
+    expect(reconnectedDb).not.toBe(oldDb)
+    expect(reconnectedDb.version).toBe(2)
+    await expect(storage.save({ name: 'x', age: 1, city: 'y' })).resolves.toBeDefined()
 
     newDb.close()
     storage.destroy()

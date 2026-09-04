@@ -36,12 +36,25 @@ npx serve .
 - 日志示例: [http://localhost:8000/examples/logger.html](http://localhost:8000/examples/logger.html)
 
 - 高级查询示例: [http://localhost:8000/examples/advanced-query.html](http://localhost:8000/examples/advanced-query.html)
+- 批量与事务示例: [http://localhost:8000/examples/bulk-transaction.html](http://localhost:8000/examples/bulk-transaction.html)
 
 ### 方法 2：使用开发服务器
 
 如果你有 Vite 或其他开发服务器，也可以直接运行。
 
 ## 示例详情
+
+### bulk-transaction.html - 批量操作与事务
+
+演示：
+
+- `bulkAdd` / `getMany` / `deleteMany` 单事务批量操作
+
+- `runInTransaction` 跨 store 原子写入（`forStore`）与回滚
+
+- keyset 分页（`after` 游标）实现无限滚动
+
+- `onWrite` 订阅（本地 + 跨标签页）与 `exportData` / `importData`
 
 ### basic.html - 基础 CRUD 操作
 

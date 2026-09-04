@@ -63,7 +63,20 @@ export interface IStorage<T = unknown> {
    */
   queryKeys(options?: QueryOptions<T>): Promise<IDBValidKey[]>
   /**
+   * 导出全部记录，用于备份或跨存储迁移。
+   * 内联 keyPath 存储可经 `importData` 无损恢复；
+   * out-of-line keys 存储导出的是值本身，键无法经 `importData` 恢复。
+   */
+  exportData(): Promise<T[]>
+  /**
+   * 导入记录（单事务 bulkPut 覆盖写，内联 keyPath 主键保留）。
+   * @param options.clearBefore 为 true 时先清空现有数据（配合 `exportData` 做全量恢复）
+   * @returns 实际写入的记录数
+   */
+  importData(items: T[], options?: { clearBefore?: boolean }): Promise<number>
+  /**
    * 订阅写入事件（本标签页 + 其他标签页经 BroadcastChannel 同步的写入）。
+   * 清理（cleanup）删除的数据同样会发出 `cleanup` 事件。
    * 注意：BroadcastChannel 不可用的环境下仅收到本地事件；`close()` 会清空所有监听器。
    * @returns 取消订阅函数
    */
@@ -75,17 +88,27 @@ export interface IStorage<T = unknown> {
    * 若 await 了非 IDB 的异步操作（fetch/setTimeout 等），事务会在事件循环
    * 空闲时自动提交，后续请求将抛出 InvalidStateError——这是 IndexedDB 规范行为。
    *
+   * @param options.stores 同库内其他 store 名称：事务将同时覆盖这些 store，
+   *   scope 内用 `tx.forStore(name)` 获取对应操作集，实现跨 store 原子写入
+   *   （如订单 + 库存）。
    * @example
    * ```ts
    * await storage.runInTransaction('readwrite', async tx => {
    *   await tx.save(order)
    *   await tx.update(inventory)
    * })
+   *
+   * // 跨 store：
+   * await orders.runInTransaction('readwrite', async tx => {
+   *   await tx.save(order)
+   *   await tx.forStore<Inventory>('inventories').update(stock)
+   * }, { stores: ['inventories'] })
    * ```
    */
   runInTransaction<R>(
     mode: IDBTransactionMode,
-    scope: (tx: ITransactionScope<T>) => Promise<R> | R
+    scope: (tx: ITransactionScope<T>) => Promise<R> | R,
+    options?: { stores?: string[] }
   ): Promise<R>
   /** 删除数据 */
   delete(key: IDBValidKey): Promise<void>
@@ -127,6 +150,11 @@ export interface ITransactionScope<T = unknown> {
   bulkDelete(keys: IDBValidKey[]): Promise<number>
   count(): Promise<number>
   query(options?: QueryOptions<T>): Promise<T[]>
+  /**
+   * 获取同一事务内其他 store 的操作集（跨 store 原子写入）。
+   * store 必须已在 runInTransaction 的 `options.stores` 中声明或为本 store。
+   */
+  forStore<U>(storeName: string): ITransactionScope<U>
 }
 
 /**
@@ -135,8 +163,8 @@ export interface ITransactionScope<T = unknown> {
 export interface StorageWriteEvent {
   /** 发生写入的 store 名称 */
   storeName: string
-  /** 写入类型 */
-  type: 'add' | 'put' | 'delete' | 'bulkAdd' | 'bulkPut' | 'bulkDelete' | 'clear'
+  /** 写入类型（`cleanup` 为自动清理删除的数据） */
+  type: 'add' | 'put' | 'delete' | 'bulkAdd' | 'bulkPut' | 'bulkDelete' | 'clear' | 'cleanup'
   /** 受影响记录的主键（`clear` 时无） */
   keys?: IDBValidKey[]
   /** 'local' = 本标签页；'remote' = 其他标签页（经 BroadcastChannel 同步） */

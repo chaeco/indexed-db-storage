@@ -41,6 +41,37 @@ interface StorageOptions {
     cleanupInterval?: number;
     /** 时间戳索引名称（用于清理，可选） */
     timestampIndexName?: string;
+    /**
+     * 目标 schema 版本（可选，正整数）。配置后 init 以 max(当前版本, 该版本) 打开：
+     * 即使没有 schema 变更也会触发升级事件，供 `onUpgrade` 做纯数据迁移。
+     */
+    version?: number;
+    /**
+     * 数据库版本升级回调：在升级事务内、索引 schema 变更应用之后执行。
+     * 用于旧数据结构迁移（字段改名/拆分等）；全新数据库（oldVersion === 0）
+     * 时也可用于种子数据。
+     *
+     * ⚠️ 与 runInTransaction 相同：ctx 内只允许 await IndexedDB 请求，
+     * await 非 IDB 异步操作会导致升级事务自动提交（IndexedDB 规范行为）。
+     * 同步抛出错误或迁移请求失败会中止升级，init() 以该错误拒绝。
+     */
+    onUpgrade?: (ctx: UpgradeContext) => void | Promise<void>;
+}
+/**
+ * onUpgrade 迁移钩子的上下文
+ */
+interface UpgradeContext {
+    /** 升级前的版本号（全新数据库为 0） */
+    oldVersion: number;
+    /** 升级后的版本号 */
+    newVersion: number;
+    /**
+     * 升级事务：可用于遍历/改写既有 store 的数据（此时 schema 变更已应用，
+     * 新索引已可使用）。
+     */
+    tx: IDBTransaction;
+    /** 升级中的数据库连接（仅本次升级事件有效） */
+    db: IDBDatabase;
 }
 /**
  * 清理配置（由 ConfigManager.getCleanupConfig() 构造，cleanupInterval 始终有值）
@@ -209,7 +240,22 @@ interface IStorage<T = unknown> {
      */
     queryKeys(options?: QueryOptions<T>): Promise<IDBValidKey[]>;
     /**
+     * 导出全部记录，用于备份或跨存储迁移。
+     * 内联 keyPath 存储可经 `importData` 无损恢复；
+     * out-of-line keys 存储导出的是值本身，键无法经 `importData` 恢复。
+     */
+    exportData(): Promise<T[]>;
+    /**
+     * 导入记录（单事务 bulkPut 覆盖写，内联 keyPath 主键保留）。
+     * @param options.clearBefore 为 true 时先清空现有数据（配合 `exportData` 做全量恢复）
+     * @returns 实际写入的记录数
+     */
+    importData(items: T[], options?: {
+        clearBefore?: boolean;
+    }): Promise<number>;
+    /**
      * 订阅写入事件（本标签页 + 其他标签页经 BroadcastChannel 同步的写入）。
+     * 清理（cleanup）删除的数据同样会发出 `cleanup` 事件。
      * 注意：BroadcastChannel 不可用的环境下仅收到本地事件；`close()` 会清空所有监听器。
      * @returns 取消订阅函数
      */
@@ -221,15 +267,26 @@ interface IStorage<T = unknown> {
      * 若 await 了非 IDB 的异步操作（fetch/setTimeout 等），事务会在事件循环
      * 空闲时自动提交，后续请求将抛出 InvalidStateError——这是 IndexedDB 规范行为。
      *
+     * @param options.stores 同库内其他 store 名称：事务将同时覆盖这些 store，
+     *   scope 内用 `tx.forStore(name)` 获取对应操作集，实现跨 store 原子写入
+     *   （如订单 + 库存）。
      * @example
      * ```ts
      * await storage.runInTransaction('readwrite', async tx => {
      *   await tx.save(order)
      *   await tx.update(inventory)
      * })
+     *
+     * // 跨 store：
+     * await orders.runInTransaction('readwrite', async tx => {
+     *   await tx.save(order)
+     *   await tx.forStore<Inventory>('inventories').update(stock)
+     * }, { stores: ['inventories'] })
      * ```
      */
-    runInTransaction<R>(mode: IDBTransactionMode, scope: (tx: ITransactionScope<T>) => Promise<R> | R): Promise<R>;
+    runInTransaction<R>(mode: IDBTransactionMode, scope: (tx: ITransactionScope<T>) => Promise<R> | R, options?: {
+        stores?: string[];
+    }): Promise<R>;
     /** 删除数据 */
     delete(key: IDBValidKey): Promise<void>;
     /** 清空数据 */
@@ -269,6 +326,11 @@ interface ITransactionScope<T = unknown> {
     bulkDelete(keys: IDBValidKey[]): Promise<number>;
     count(): Promise<number>;
     query(options?: QueryOptions<T>): Promise<T[]>;
+    /**
+     * 获取同一事务内其他 store 的操作集（跨 store 原子写入）。
+     * store 必须已在 runInTransaction 的 `options.stores` 中声明或为本 store。
+     */
+    forStore<U>(storeName: string): ITransactionScope<U>;
 }
 /**
  * 写入事件（onWrite 回调参数）。
@@ -276,8 +338,8 @@ interface ITransactionScope<T = unknown> {
 interface StorageWriteEvent {
     /** 发生写入的 store 名称 */
     storeName: string;
-    /** 写入类型 */
-    type: 'add' | 'put' | 'delete' | 'bulkAdd' | 'bulkPut' | 'bulkDelete' | 'clear';
+    /** 写入类型（`cleanup` 为自动清理删除的数据） */
+    type: 'add' | 'put' | 'delete' | 'bulkAdd' | 'bulkPut' | 'bulkDelete' | 'clear' | 'cleanup';
     /** 受影响记录的主键（`clear` 时无） */
     keys?: IDBValidKey[];
     /** 'local' = 本标签页；'remote' = 其他标签页（经 BroadcastChannel 同步） */
@@ -414,10 +476,26 @@ declare class IndexedDBStorage<T = unknown> implements IStorage<T> {
      *
      * ⚠️ scope 内只允许 await IndexedDB 请求；await 非 IDB 异步操作会导致
      * 事务自动提交（IndexedDB 规范行为），后续请求将抛出 InvalidStateError。
+     *
+     * @param options.stores 同库内其他 store：事务覆盖这些 store，
+     *   scope 内用 `tx.forStore(name)` 获取操作集，实现跨 store 原子写入。
      */
-    runInTransaction<R>(mode: IDBTransactionMode, scope: (tx: ITransactionScope<T>) => Promise<R> | R): Promise<R>;
-    /** 创建绑定到指定事务的操作集 */
-    private createTransactionScope;
+    runInTransaction<R>(mode: IDBTransactionMode, scope: (tx: ITransactionScope<T>) => Promise<R> | R, options?: {
+        stores?: string[];
+    }): Promise<R>;
+    /**
+     * 导出全部记录（备份 / 跨存储迁移）。
+     * 内联 keyPath 存储可经 `importData` 无损恢复；out-of-line keys 存储导出的是值本身。
+     */
+    exportData(): Promise<T[]>;
+    /**
+     * 导入记录（单事务 bulkPut 覆盖写，内联 keyPath 主键保留）。
+     * @param options.clearBefore 为 true 时先清空现有数据（配合 `exportData` 做全量恢复）
+     * @returns 实际写入的记录数
+     */
+    importData(items: T[], options?: {
+        clearBefore?: boolean;
+    }): Promise<number>;
     /**
      * 请求将当前源（origin）标记为持久化存储，降低浏览器在存储压力下
      * 驱逐本库数据的概率。注意：对 Safari ITP 的"7 天不活跃清除"无效，
@@ -462,10 +540,12 @@ declare class IndexedDBStorage<T = unknown> implements IStorage<T> {
      */
     destroy(): void;
     /**
-     * 确保数据库已初始化
+     * 确保数据库可用。
+     * versionchange 让位后的自动重连进行中时，操作会等待重连完成而非直接报错；
+     * 重连失败时操作以重连错误拒绝。真正未初始化（未调用过 init）仍报原错误。
      */
-    private ensureInitialized;
+    private ensureReady;
 }
 
 export { IndexedDBStorage };
-export type { CleanupConfig, IStorage, ITransactionScope, IndexConfig, QueryOptions as IndexedDBQueryOptions, StorageOptions as IndexedDBStorageOptions, QueryOperator, QueryOptions, SortOption, StorageOptions, StorageWriteEvent, StoreConfig, WhereCondition };
+export type { CleanupConfig, IStorage, ITransactionScope, IndexConfig, QueryOptions as IndexedDBQueryOptions, StorageOptions as IndexedDBStorageOptions, QueryOperator, QueryOptions, SortOption, StorageOptions, StorageWriteEvent, StoreConfig, UpgradeContext, WhereCondition };

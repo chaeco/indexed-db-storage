@@ -40,6 +40,11 @@ export class ConfigManager {
         )
       }
     }
+    if (options.version !== undefined) {
+      if (!Number.isInteger(options.version) || options.version < 1) {
+        throw new Error('StorageOptions.version must be a positive integer.')
+      }
+    }
     // retentionTime / maxRecords 必须配合 cleanupInterval 才会生效；
     // 仅配置二者之一而不设 cleanupInterval，定时清理逻辑永远不会运行，属于静默失效的常见误用。
     // 注意：即使不设 cleanupInterval，仍可通过手动调用 cleanup() 触发一次性清理。
@@ -100,6 +105,16 @@ export class ConfigManager {
         autoIncrement: true,
       }
     )
+  }
+
+  /** 版本升级迁移钩子（未配置时为 undefined） */
+  getOnUpgrade(): StorageOptions['onUpgrade'] {
+    return this.storageOptions.onUpgrade
+  }
+
+  /** 目标 schema 版本（未配置时为 undefined） */
+  getTargetVersion(): number | undefined {
+    return this.storageOptions.version
   }
 
   /**

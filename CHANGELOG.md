@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-04
+
+### Added
+
+- **Data migration hook** — `StorageOptions.onUpgrade(ctx)` runs inside the upgrade transaction after index schema changes are applied; new databases (`oldVersion === 0`) can be seeded. `StorageOptions.version` forces an upgrade event for data-only migrations. Sync throws / failed migration requests abort the upgrade and reject `init()`.
+- **Cross-store atomic transactions** — `runInTransaction(mode, scope, { stores: [...] })` spans multiple stores of the same database; `tx.forStore(name)` returns the operation set for another store. Write events are routed to the owning instance (`source: 'remote'` via BroadcastChannel for same-tab cross-store writes).
+- **Backup & restore** — `exportData()` returns all records; `importData(items, { clearBefore })` restores via one `bulkPut` transaction.
+- **Auto-reconnect (autoOpen)** — after yielding a connection to a cross-tab upgrade, the instance re-opens automatically at the new version; operations started during reconnection wait for it instead of failing. Multi-store apps no longer need manual re-init after schema evolution.
+- **`cleanup` write events** — auto-cleanup deletions now emit `onWrite` events with the deleted primary keys, so UIs no longer hold stale views.
+- **Friendly `DataCloneError`** — clone failures (e.g. Vue `reactive()` proxies) are rethrown with a clear fix hint (`toRaw()` / JSON copy), original error preserved as `cause`. Sync clone failures inside `bulkAdd`/`bulkPut` now abort the transaction (all-or-nothing held).
+
 ## [0.1.0] - 2026-09-03
 
 ### Added

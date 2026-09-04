@@ -112,11 +112,25 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
         const db = await initDatabase(
           this.config.getDbName(),
           this.config.getStoreConfig(),
-          // 连接被 versionchange 让位逻辑或其他外部原因关闭时，同步清空内部引用，
-          // 避免 ensureInitialized() 在陈旧连接上继续操作
-          () => {
-            if (this.db === db) this.db = null
-          }
+          {
+            // 连接被 versionchange 让位逻辑或其他外部原因关闭时，同步清空内部引用，
+            // 避免 ensureInitialized() 在陈旧连接上继续操作
+            onClose: () => {
+              if (this.db === db) {
+                this.db = null
+                this.stopCleanupTimer()
+                this.cleanupManager = undefined
+                // 自动重连（Dexie autoOpen 语义）：让位后自动以新版本重新打开。
+                // 多 store 应用 schema 演进时（另一 store 的 init 触发升级），
+                // 本实例无需手动 re-init 即可继续工作。
+                this.init().catch((err: unknown) => {
+                  console.warn('[IndexedDBStorage] Auto re-init after versionchange failed:', err)
+                })
+              }
+            },
+            onUpgrade: this.config.getOnUpgrade(),
+          },
+          this.config.getTargetVersion()
         )
 
         // 世代不匹配：等待期间 close() 已被调用，丢弃此连接避免泄漏。
@@ -146,7 +160,9 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
           this.cleanupManager = new CleanupManager(
             this.db,
             this.config.getStoreName(),
-            cleanupConfig
+            cleanupConfig,
+            // 清理删除的数据同样发事件，UI 不再持有过期视图
+            keys => this.emitWrite('cleanup', keys)
           )
           this.cleanupManager.start()
         }
@@ -162,7 +178,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 保存数据
    */
   async save(data: T): Promise<IDBValidKey> {
-    this.ensureInitialized()
+    await this.ensureReady()
     const key = await saveData(this.db!, this.config.getStoreName(), data)
 
     this.emitWrite('add', [key])
@@ -178,7 +194,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 任一记录写入失败（如键冲突）时整个批次回滚并以首个错误 reject。
    */
   async bulkAdd(items: T[]): Promise<IDBValidKey[]> {
-    this.ensureInitialized()
+    await this.ensureReady()
     const keys = await bulkAddData(this.db!, this.config.getStoreName(), items)
 
     this.emitWrite('bulkAdd', keys)
@@ -191,7 +207,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 批量更新/插入数据（单事务 upsert，全有或全无）。
    */
   async bulkPut(items: T[]): Promise<IDBValidKey[]> {
-    this.ensureInitialized()
+    await this.ensureReady()
     const keys = await bulkPutData(this.db!, this.config.getStoreName(), items)
 
     this.emitWrite('bulkPut', keys)
@@ -205,7 +221,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * @returns 实际删除的记录数（删除不存在的 key 不算错误，也不计数）
    */
   async bulkDelete(keys: IDBValidKey[]): Promise<number> {
-    this.ensureInitialized()
+    await this.ensureReady()
     const deleted = await bulkDeleteData(this.db!, this.config.getStoreName(), keys)
 
     this.emitWrite('bulkDelete', keys)
@@ -221,7 +237,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * `get()` 确认记录存在后再调用此方法。
    */
   async update(data: T): Promise<IDBValidKey> {
-    this.ensureInitialized()
+    await this.ensureReady()
     const key = await updateData(this.db!, this.config.getStoreName(), data)
 
     this.emitWrite('put', [key])
@@ -233,7 +249,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 查询数据
    */
   async query(options?: QueryOptions<T>): Promise<T[]> {
-    this.ensureInitialized()
+    await this.ensureReady()
     return queryData<T>(this.db!, this.config.getStoreName(), options)
   }
 
@@ -241,7 +257,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 根据主键获取数据
    */
   async get(key: IDBValidKey): Promise<T | undefined> {
-    this.ensureInitialized()
+    await this.ensureReady()
     return getData<T>(this.db!, this.config.getStoreName(), key)
   }
 
@@ -249,7 +265,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 删除数据
    */
   async delete(key: IDBValidKey): Promise<void> {
-    this.ensureInitialized()
+    await this.ensureReady()
     await deleteData(this.db!, this.config.getStoreName(), key)
 
     this.emitWrite('delete', [key])
@@ -259,7 +275,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 清空所有数据
    */
   async clear(): Promise<void> {
-    this.ensureInitialized()
+    await this.ensureReady()
     await clearAllData(this.db!, this.config.getStoreName())
 
     this.emitWrite('clear')
@@ -269,7 +285,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 获取记录总数
    */
   async count(): Promise<number> {
-    this.ensureInitialized()
+    await this.ensureReady()
     return getCount(this.db!, this.config.getStoreName())
   }
 
@@ -277,7 +293,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 批量获取数据（单事务）。与输入顺序一致；不存在的 key 对应 undefined。
    */
   async getMany(keys: IDBValidKey[]): Promise<(T | undefined)[]> {
-    this.ensureInitialized()
+    await this.ensureReady()
     return getManyData<T>(this.db!, this.config.getStoreName(), keys)
   }
 
@@ -290,7 +306,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
     onItem: (item: T, key: IDBValidKey) => void | false,
     options?: QueryOptions<T>
   ): Promise<number> {
-    this.ensureInitialized()
+    await this.ensureReady()
     return iterateData<T>(this.db!, this.config.getStoreName(), options, onItem)
   }
 
@@ -300,7 +316,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * @returns 实际删除的记录数
    */
   async deleteMany(options?: QueryOptions<T>): Promise<number> {
-    this.ensureInitialized()
+    await this.ensureReady()
     return deleteManyData<T>(this.db!, this.config.getStoreName(), options)
   }
 
@@ -309,7 +325,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    * 未指定 indexName 时返回主键；指定时返回该索引的键。
    */
   async queryKeys(options?: QueryOptions<T>): Promise<IDBValidKey[]> {
-    this.ensureInitialized()
+    await this.ensureReady()
     return queryKeysData(this.db!, this.config.getStoreName(), options)
   }
 
@@ -336,22 +352,29 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
   }
 
   /** 写入操作完成后调用：通知本地监听器 + 广播到其他标签页 */
-  private emitWrite(type: StorageWriteEvent['type'], keys?: IDBValidKey[]): void {
-    const event: StorageWriteEvent = {
-      storeName: this.config.getStoreName(),
-      type,
-      keys,
-      source: 'local',
+  private emitWrite(
+    type: StorageWriteEvent['type'],
+    keys?: IDBValidKey[],
+    storeName: string = this.config.getStoreName()
+  ): void {
+    // 事件按 store 归属路由：本实例只本地投递自己 store 的写入
+    // （跨 store 事务中其他 store 的写入由对应实例经 BroadcastChannel 以 remote 收到）
+    if (storeName === this.config.getStoreName()) {
+      this.dispatchWrite({
+        storeName,
+        type,
+        keys,
+        source: 'local',
+      })
     }
-    this.dispatchWrite(event)
 
     if (this._writeChannel) {
       try {
         // 广播体不携带 source——接收方以 'remote' 分发
         this._writeChannel.postMessage({
-          storeName: event.storeName,
-          type: event.type,
-          keys: event.keys,
+          storeName,
+          type,
+          keys,
         })
       } catch {
         // 消息不可结构化克隆等场景：跨标签页通知失败不影响写入本身
@@ -364,37 +387,66 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
    *
    * ⚠️ scope 内只允许 await IndexedDB 请求；await 非 IDB 异步操作会导致
    * 事务自动提交（IndexedDB 规范行为），后续请求将抛出 InvalidStateError。
+   *
+   * @param options.stores 同库内其他 store：事务覆盖这些 store，
+   *   scope 内用 `tx.forStore(name)` 获取操作集，实现跨 store 原子写入。
    */
   async runInTransaction<R>(
     mode: IDBTransactionMode,
-    scope: (tx: ITransactionScope<T>) => Promise<R> | R
+    scope: (tx: ITransactionScope<T>) => Promise<R> | R,
+    options?: { stores?: string[] }
   ): Promise<R> {
-    this.ensureInitialized()
-    const tx = this.db!.transaction([this.config.getStoreName()], mode)
-    const scopeObj = this.createTransactionScope(tx)
+    await this.ensureReady()
+    const db = this.db!
+    const ownStore = this.config.getStoreName()
 
-    // 收集 scope 内的写入，待事务成功提交后统一发出 onWrite 事件
-    const pendingWrites: { type: StorageWriteEvent['type']; keys?: IDBValidKey[] }[] = []
-    const trackWrite = (type: StorageWriteEvent['type']): (keys?: IDBValidKey[]) => void => {
-      return keys => {
-        pendingWrites.push({ type, keys })
+    const extraStores = options?.stores ?? []
+    for (const name of extraStores) {
+      if (!db.objectStoreNames.contains(name)) {
+        throw new Error(
+          `[IndexedDBStorage] runInTransaction: store "${name}" does not exist in database "${this.config.getDbName()}".`
+        )
       }
     }
+    const storeNames = Array.from(new Set([ownStore, ...extraStores]))
+    const tx = db.transaction(storeNames, mode)
 
-    const scopedTx: ITransactionScope<T> = {
-      get: scopeObj.get,
-      getMany: scopeObj.getMany,
-      count: scopeObj.count,
-      query: scopeObj.query,
-      save: data => scopeObj.save(data).then(key => (trackWrite('add')([key]), key)),
-      update: data => scopeObj.update(data).then(key => (trackWrite('put')([key]), key)),
+    // 收集 scope 内的写入（含跨 store），事务成功提交后统一发出 onWrite 事件
+    const pendingWrites: {
+      storeName: string
+      type: StorageWriteEvent['type']
+      keys?: IDBValidKey[]
+    }[] = []
+    const record =
+      (storeName: string) =>
+      (type: StorageWriteEvent['type']) =>
+      (keys?: IDBValidKey[]): void => {
+        pendingWrites.push({ storeName, type, keys })
+      }
+
+    const makeScope = <T2>(storeName: string): ITransactionScope<T2> => ({
+      get: key => getData<T2>(db, storeName, key, tx),
+      getMany: keys => getManyData<T2>(db, storeName, keys, tx),
+      save: data => saveData(db, storeName, data, tx).then(key => (record(storeName)('add')([key]), key)),
+      update: data => updateData(db, storeName, data, tx).then(key => (record(storeName)('put')([key]), key)),
       bulkAdd: items =>
-        scopeObj.bulkAdd(items).then(keys => (trackWrite('bulkAdd')(keys), keys)),
-      bulkPut: items => scopeObj.bulkPut(items).then(keys => (trackWrite('bulkPut')(keys), keys)),
-      delete: key => scopeObj.delete(key).then(() => trackWrite('delete')([key])),
+        bulkAddData(db, storeName, items, tx).then(keys => (record(storeName)('bulkAdd')(keys), keys)),
+      bulkPut: items =>
+        bulkPutData(db, storeName, items, tx).then(keys => (record(storeName)('bulkPut')(keys), keys)),
+      delete: key => deleteData(db, storeName, key, tx).then(() => record(storeName)('delete')([key])),
       bulkDelete: keys =>
-        scopeObj.bulkDelete(keys).then(n => (trackWrite('bulkDelete')(keys), n)),
-    }
+        bulkDeleteData(db, storeName, keys, tx).then(n => (record(storeName)('bulkDelete')(keys), n)),
+      count: () => getCount(db, storeName, tx),
+      query: opts => queryData<T2>(db, storeName, opts, tx),
+      forStore: <U>(name: string): ITransactionScope<U> => {
+        if (!db.objectStoreNames.contains(name)) {
+          throw new Error(
+            `[IndexedDBStorage] forStore("${name}"): store does not exist in database "${this.config.getDbName()}".`
+          )
+        }
+        return makeScope<U>(name)
+      },
+    })
 
     let outcome: { ok: true; value: R } | { ok: false; error: unknown } | null = null
 
@@ -409,7 +461,7 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
     })
 
     try {
-      const value = await scope(scopedTx)
+      const value = await scope(makeScope<T>(ownStore))
       outcome = { ok: true, value }
     } catch (err) {
       outcome = { ok: false, error: err }
@@ -429,30 +481,39 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
       throw tx.error ?? new Error('Transaction aborted')
     }
 
-    // 事务成功提交：统一发出 scope 内累积的写入事件
+    // 事务成功提交：统一发出 scope 内累积的写入事件（含各跨 store 写入）
     for (const write of pendingWrites) {
-      this.emitWrite(write.type, write.keys)
+      this.emitWrite(write.type, write.keys, write.storeName)
     }
 
     return (outcome as { ok: true; value: R }).value
   }
 
-  /** 创建绑定到指定事务的操作集 */
-  private createTransactionScope(tx: IDBTransaction): ITransactionScope<T> {
-    const db = this.db!
-    const storeName = this.config.getStoreName()
-    return {
-      get: key => getData<T>(db, storeName, key, tx),
-      getMany: keys => getManyData<T>(db, storeName, keys, tx),
-      save: data => saveData(db, storeName, data, tx),
-      update: data => updateData(db, storeName, data, tx),
-      bulkAdd: items => bulkAddData(db, storeName, items, tx),
-      bulkPut: items => bulkPutData(db, storeName, items, tx),
-      delete: key => deleteData(db, storeName, key, tx),
-      bulkDelete: keys => bulkDeleteData(db, storeName, keys, tx),
-      count: () => getCount(db, storeName, tx),
-      query: options => queryData<T>(db, storeName, options, tx),
+  /**
+   * 导出全部记录（备份 / 跨存储迁移）。
+   * 内联 keyPath 存储可经 `importData` 无损恢复；out-of-line keys 存储导出的是值本身。
+   */
+  async exportData(): Promise<T[]> {
+    await this.ensureReady()
+    return queryData<T>(this.db!, this.config.getStoreName())
+  }
+
+  /**
+   * 导入记录（单事务 bulkPut 覆盖写，内联 keyPath 主键保留）。
+   * @param options.clearBefore 为 true 时先清空现有数据（配合 `exportData` 做全量恢复）
+   * @returns 实际写入的记录数
+   */
+  async importData(items: T[], options?: { clearBefore?: boolean }): Promise<number> {
+    await this.ensureReady()
+    if (options?.clearBefore) {
+      await clearAllData(this.db!, this.config.getStoreName())
     }
+    const keys = await bulkPutData(this.db!, this.config.getStoreName(), items)
+
+    this.emitWrite('bulkPut', keys)
+    this.maybeTriggerCleanup()
+
+    return keys.length
   }
 
   /**
@@ -551,10 +612,15 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
   }
 
   /**
-   * 确保数据库已初始化
+   * 确保数据库可用。
+   * versionchange 让位后的自动重连进行中时，操作会等待重连完成而非直接报错；
+   * 重连失败时操作以重连错误拒绝。真正未初始化（未调用过 init）仍报原错误。
    */
-  private ensureInitialized(): void {
-    if (!this.db) {
-      throw new Error('Database not initialized. Call init() first.')
+  private async ensureReady(): Promise<void> {
+    if (this.db) return
+    if (this.initPromise) {
+      await this.initPromise
+      if (this.db) return
     }
+    throw new Error('Database not initialized. Call init() first.')
   }}

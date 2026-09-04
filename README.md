@@ -17,7 +17,7 @@ A universal IndexedDB storage solution providing powerful persistent storage cap
 - 🔒 **Type Safe** - Full TypeScript generic support for robust data handling.
 - 🔄 **Singleton Pattern** - Automatically manages instances based on `dbName` + `storeName` combinations, reusing connections for identical configurations.
 - 🧹 **Auto Cleanup** - Configurable data retention mechanisms based on capacity or age.
-- ⚙️ **Flexible Configuration** - Customize `keyPath`, indexes, and other database settings. New or changed index definitions are applied automatically on the next `init()`.
+- ⚙️ **Flexible Configuration & Migrations** - Customize `keyPath`, indexes, and other database settings. New or changed index definitions are applied automatically on the next `init()`, with an `onUpgrade` hook for data migrations. Connections auto-reopen after yielding to cross-tab upgrades (autoOpen).
 - 📦 **Zero Dependencies** - Lightweight design with no external dependencies.
 - 🚀 **Modern API** - Promise-based asynchronous API for seamless integration with `async/await`.
 - ✅ **Well Tested** - 157 test cases with extensive coverage of core logic and edge cases.
@@ -272,6 +272,55 @@ await IndexedDBStorage.requestPersistence()
 
 // Origin-level quota usage
 const { usage, quota } = (await IndexedDBStorage.estimate()) ?? {}
+```
+
+### Data Migrations
+
+```typescript
+const storage = new IndexedDBStorage<User>(
+  {
+    dbName: 'my-app',
+    storeName: 'users',
+    // Bump to trigger the upgrade event, even without schema changes
+    version: 2,
+    // Runs inside the upgrade transaction, after index changes are applied.
+    // Seed new databases (oldVersion === 0) or migrate old record shapes.
+    onUpgrade: async ctx => {
+      const store = ctx.tx.objectStore('users')
+      const all = await new Promise(resolve => {
+        const req = store.getAll()
+        req.onsuccess = () => resolve(req.result)
+      })
+      for (const record of all) {
+        await store.put({ ...record, migratedAt: Date.now() })
+      }
+    },
+  }
+  // ...
+)
+```
+
+⚠️ Only await IndexedDB requests inside `onUpgrade`; non-IDB awaits let the upgrade transaction auto-commit (spec behavior).
+
+### Cross-Store Atomic Transactions
+
+```typescript
+// One transaction spanning two stores of the same database
+await orders.runInTransaction(
+  'readwrite',
+  async tx => {
+    await tx.save(order)
+    await tx.forStore('stocks').put({ item: order.item, qty: stock.qty - 2 })
+  },
+  { stores: ['stocks'] }
+)
+```
+
+### Backup & Restore
+
+```typescript
+const snapshot = await storage.exportData()      // all records
+await storage.importData(snapshot, { clearBefore: true }) // wipe + restore
 ```
 
 ## License

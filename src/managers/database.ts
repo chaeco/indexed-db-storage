@@ -2,7 +2,15 @@
  * 数据库管理器 - 负责 IndexedDB 的创建和升级
  */
 
-import type { IndexConfig, StoreConfig } from '../types/index'
+import type { IndexConfig, StoreConfig, UpgradeContext } from '../types/index'
+
+/** initDatabase 的回调集合 */
+export interface DatabaseHooks {
+  /** 连接被 versionchange 让位或其他外部原因关闭时通知上层 */
+  onClose?: () => void
+  /** 版本升级迁移钩子（在 schema 变更应用后、升级事务内执行） */
+  onUpgrade?: (ctx: UpgradeContext) => void | Promise<void>
+}
 
 /**
  * 获取当前环境的 indexedDB 实现（兼容浏览器与 Node.js 测试环境）
@@ -21,17 +29,51 @@ function getIndexedDB(): IDBFactory {
 }
 
 /**
+ * 在升级事务内执行迁移钩子。
+ *
+ * - 同步抛出错误或迁移请求失败 → 升级事务 abort，init() 以该错误拒绝；
+ * - 异步迁移的存活依赖"每个 await 都来自 IDB 请求"（规范行为），
+ *   Promise 拒绝无法中止已提交的升级事务，仅记录错误。
+ */
+function runUpgradeHook(
+  hook: DatabaseHooks['onUpgrade'],
+  event: IDBVersionChangeEvent,
+  db: IDBDatabase,
+  tx: IDBTransaction
+): void {
+  if (!hook) return
+
+  // 钩子同步抛错：直接向上抛出（调用方 catch 后 reject init），
+  // 事件处理器异常会让升级事务自然中止
+  const result = hook({
+    oldVersion: event.oldVersion,
+    newVersion: event.newVersion ?? db.version,
+    tx,
+    db,
+  })
+  if (result && typeof result.then === 'function') {
+    result.catch(err => {
+      console.error(
+        '[IndexedDBStorage] onUpgrade hook rejected. If the upgrade transaction already committed, the migration did not apply:',
+        err
+      )
+    })
+  }
+}
+
+/**
  * 初始化 IndexedDB 数据库。
  *
  * 采用"先探测版本再按需升级"策略，避免硬编码版本号：
  * 1. 不带版本号打开数据库，获取当前版本（若不存在则以版本 1 创建）
- * 2. 若目标 object store 不存在，以 currentVersion + 1 重新打开并在
- *    onupgradeneeded 中创建 store
+ * 2. 若 store 缺失或索引配置有变化，以 currentVersion + 1 重新打开并在
+ *    onupgradeneeded 中应用 schema 变更与迁移钩子
  */
 export async function initDatabase(
   dbName: string,
   storeConfig: StoreConfig,
-  onClose?: () => void
+  hooks?: DatabaseHooks,
+  targetVersion?: number
 ): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     let idb: IDBFactory
@@ -48,8 +90,18 @@ export async function initDatabase(
     probeRequest.onerror = () => reject(probeRequest.error)
 
     // 只有全新数据库才会触发此事件，在此处创建 store 即可
-    probeRequest.onupgradeneeded = () => {
+    probeRequest.onupgradeneeded = event => {
       createObjectStore(probeRequest.result, storeConfig)
+      // 全新数据库（oldVersion === 0）：迁移钩子可用于种子数据
+      if (probeRequest.transaction) {
+        try {
+          runUpgradeHook(hooks?.onUpgrade, event, probeRequest.result, probeRequest.transaction)
+        } catch (err) {
+          // 钩子同步抛错：以原始错误拒绝 init（升级事务随事件处理器异常自然中止）
+          reject(err)
+          return
+        }
+      }
     }
 
     probeRequest.onsuccess = () => {
@@ -57,15 +109,19 @@ export async function initDatabase(
 
       // Schema diff：store 缺失或索引配置（新增/定义变化）需要升级
       const changes = diffSchemaChanges(db, storeConfig)
+      // 显式 version 目标：即使无 schema 变更也触发升级（供 onUpgrade 做纯数据迁移）
+      const hasVersionTarget = targetVersion !== undefined && targetVersion > db.version
 
-      if (!changes) {
-        attachVersionchangeHandler(db, dbName, onClose)
+      if (!changes && !hasVersionTarget) {
+        attachVersionchangeHandler(db, dbName, hooks?.onClose)
         resolve(db)
         return
       }
 
-      // 存在 schema 变更：以 currentVersion+1 重新打开，在 onupgradeneeded 中应用
-      const nextVersion = db.version + 1
+      // 存在变更：以更高版本重新打开，在 onupgradeneeded 中应用 schema 变更与迁移钩子
+      const nextVersion = changes
+        ? Math.max(db.version + 1, targetVersion ?? 0)
+        : (targetVersion as number)
       db.close()
 
       const upgradeRequest = idb.open(dbName, nextVersion)
@@ -79,27 +135,36 @@ export async function initDatabase(
         )
       }
 
-      upgradeRequest.onupgradeneeded = () => {
+      upgradeRequest.onupgradeneeded = event => {
         const upgradedDb = upgradeRequest.result
-        if (changes.createStore) {
-          if (!upgradedDb.objectStoreNames.contains(storeConfig.storeName)) {
-            createObjectStore(upgradedDb, storeConfig)
+        if (changes) {
+          if (changes.createStore) {
+            if (!upgradedDb.objectStoreNames.contains(storeConfig.storeName)) {
+              createObjectStore(upgradedDb, storeConfig)
+            }
+          } else if (upgradeRequest.transaction) {
+            // 升级事务通过 upgradeRequest.transaction 获取（db.transaction 在升级期间为 null）
+            applyIndexChanges(
+              upgradeRequest.transaction,
+              storeConfig.storeName,
+              changes.indexChanges
+            )
           }
-          return
         }
-        // 升级事务通过 upgradeRequest.transaction 获取（db.transaction 在升级期间为 null）
         if (upgradeRequest.transaction) {
-          applyIndexChanges(
-            upgradeRequest.transaction,
-            storeConfig.storeName,
-            changes.indexChanges
-          )
+          try {
+            runUpgradeHook(hooks?.onUpgrade, event, upgradedDb, upgradeRequest.transaction)
+          } catch (err) {
+            // 钩子同步抛错：以原始错误拒绝 init（升级事务随事件处理器异常自然中止）
+            reject(err)
+            return
+          }
         }
       }
 
       upgradeRequest.onsuccess = () => {
         const db = upgradeRequest.result
-        attachVersionchangeHandler(db, dbName, onClose)
+        attachVersionchangeHandler(db, dbName, hooks?.onClose)
         resolve(db)
       }
       upgradeRequest.onerror = () => reject(upgradeRequest.error)

@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IndexedDB Storage 批量与事务示例</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      max-width: 800px;
+      margin: 50px auto;
+      padding: 0 20px;
+    }
+    h1 { color: #333; }
+    .section {
+      margin: 30px 0;
+      padding: 20px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 5px;
+      border: none;
+      border-radius: 4px;
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+    }
+    button:hover { background: #0056b3; }
+    .output {
+      margin-top: 15px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 4px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+  </style>
+</head>
+<body>
+  <h1>IndexedDB Storage 批量与事务示例</h1>
+
+  <div class="section">
+    <h2>批量操作（单事务）</h2>
+    <button onclick="demoBulk()">批量写入 / 批量读取 / 批量删除</button>
+    <div class="output" id="bulk-output"></div>
+  </div>
+
+  <div class="section">
+    <h2>原子事务与跨 store 事务</h2>
+    <button onclick="demoTransaction()">下单 + 扣库存（原子）</button>
+    <button onclick="demoTransactionRollback()">中途失败（全部回滚）</button>
+    <div class="output" id="tx-output"></div>
+  </div>
+
+  <div class="section">
+    <h2>keyset 分页（无限滚动）</h2>
+    <button onclick="demoKeyset()">加载下一页</button>
+    <div class="output" id="keyset-output"></div>
+  </div>
+
+  <div class="section">
+    <h2>跨标签页事件 / 导出导入</h2>
+    <button onclick="demoEvents()">订阅 onWrite</button>
+    <button onclick="demoExportImport()">导出 → 清空 → 恢复</button>
+    <div class="output" id="event-output"></div>
+  </div>
+
+  <script type="module">
+    import { IndexedDBStorage } from '../dist/index.js'
+
+    const orders = new IndexedDBStorage(
+      { dbName: 'example-advanced-db', storeName: 'orders' },
+      { storeName: 'orders', keyPath: 'id', autoIncrement: true }
+    )
+    const stocks = new IndexedDBStorage(
+      { dbName: 'example-advanced-db', storeName: 'stocks' },
+      { storeName: 'stocks', keyPath: 'item' }
+    )
+    const logs = new IndexedDBStorage(
+      { dbName: 'example-advanced-db', storeName: 'logs' },
+      { storeName: 'logs', keyPath: 'id', autoIncrement: true }
+    )
+
+    // 工具函数：显示输出
+    function output(elementId, message) {
+      const el = document.getElementById(elementId)
+      const time = new Date().toLocaleTimeString()
+      el.innerHTML += `<pre>[${time}] ${message}</pre>`
+      el.scrollTop = el.scrollHeight
+    }
+
+    let inited = false
+    async function ensureInit() {
+      if (inited) return
+      // 同库多 store：第二个 init 会触发版本升级，
+      // 其他实例会自动让位并以新版本重连，无需手动 re-init
+      await orders.init()
+      await stocks.init()
+      await logs.init()
+      inited = true
+    }
+
+    // 批量操作示例
+    window.demoBulk = async function() {
+      try {
+        await ensureInit()
+        await logs.clear()
+
+        // 单事务批量写入：N 条数据 = 1 次事务开销
+        const t0 = performance.now()
+        const keys = await logs.bulkAdd(
+          Array.from({ length: 2000 }, (_, i) => ({ level: 'info', message: `log-${i}`, at: Date.now() }))
+        )
+        output('bulk-output', `bulkAdd 2000 条，耗时 ${(performance.now() - t0).toFixed(1)}ms`)
+
+        // 批量读取：单事务取回多个 key，缺失的为 undefined
+        const got = await logs.getMany([keys[0], keys[100], 999999])
+        output('bulk-output', `getMany: ${got.map(x => (x ? x.message : '(缺失)')).join(', ')}`)
+
+        // 按条件批量删除
+        const deleted = await logs.deleteMany({
+          where: { field: 'level', operator: 'eq', value: 'info' },
+        })
+        output('bulk-output', `deleteMany 删除 ${deleted} 条，剩余 ${await logs.count()} 条`)
+      } catch (err) {
+        output('bulk-output', `错误：${err.message}`)
+      }
+    }
+
+    // 原子事务示例：下单 + 扣库存
+    window.demoTransaction = async function() {
+      try {
+        await ensureInit()
+        await stocks.put({ item: 'book', qty: 10 })
+
+        await orders.runInTransaction(
+          'readwrite',
+          async tx => {
+            await tx.save({ item: 'book', count: 2 })
+            const stock = await tx.forStore('stocks').get('book')
+            await tx.forStore('stocks').put({ item: 'book', qty: stock.qty - 2 })
+          },
+          { stores: ['stocks'] }
+        )
+        output('tx-output', '下单成功：订单 + 库存变更原子提交')
+        output('tx-output', `当前库存：${JSON.stringify(await stocks.get('book'))}`)
+      } catch (err) {
+        output('tx-output', `错误：${err.message}`)
+      }
+    }
+
+    // 事务回滚示例
+    window.demoTransactionRollback = async function() {
+      try {
+        await ensureInit()
+        const before = await orders.count()
+        await orders.runInTransaction(
+          'readwrite',
+          async tx => {
+            await tx.save({ item: 'broken-order' })
+            throw new Error('支付失败，模拟异常')
+          },
+          { stores: ['stocks'] }
+        )
+      } catch (err) {
+        const after = await orders.count()
+        output('tx-output', `事务失败已回滚：${err.message}（订单数 ${before} → ${after}）`)
+      }
+    }
+
+    // keyset 分页示例
+    let lastKey = null
+    let pageNum = 0
+    window.demoKeyset = async function() {
+      try {
+        await ensureInit()
+        if (pageNum === 0) {
+          await logs.clear()
+          await logs.bulkAdd(
+            Array.from({ length: 25 }, (_, i) => ({ level: 'page', message: `item-${i}` }))
+          )
+        }
+        // 用上一页最后一条的主键作为游标，避免 offset 越翻越慢
+        const options = { limit: 10 }
+        if (lastKey !== null) options.after = lastKey
+        const page = await logs.query(options)
+        if (page.length === 0) {
+          output('keyset-output', '—— 已无更多数据 ——')
+          pageNum = 0
+          lastKey = null
+          return
+        }
+        pageNum++
+        lastKey = page[page.length - 1].id
+        output('keyset-output', `第 ${pageNum} 页（10 条）：${page.map(x => x.message).join(', ')}`)
+      } catch (err) {
+        output('keyset-output', `错误：${err.message}`)
+      }
+    }
+
+    // 跨标签页事件示例
+    let listening = false
+    window.demoEvents = async function() {
+      try {
+        await ensureInit()
+        if (listening) {
+          output('event-output', '已在监听中。试试再开一个标签页执行批量写入。')
+          return
+        }
+        listening = true
+        orders.onWrite(event => {
+          output('event-output', `[${event.source}] ${event.storeName} ${event.type}（keys: ${JSON.stringify(event.keys)}）`)
+        })
+        output('event-output', '已订阅 onWrite。本页或另一标签页的写入都会显示在这里。')
+        await orders.save({ item: 'event-demo' })
+      } catch (err) {
+        output('event-output', `错误：${err.message}`)
+      }
+    }
+
+    // 导出导入示例
+    window.demoExportImport = async function() {
+      try {
+        await ensureInit()
+        await orders.clear()
+        await orders.bulkAdd([{ item: 'a' }, { item: 'b' }, { item: 'c' }])
+
+        const snapshot = await orders.exportData()
+        output('event-output', `已导出 ${snapshot.length} 条记录`)
+
+        await orders.importData(snapshot, { clearBefore: true })
+        output('event-output', `清空后恢复 ${snapshot.length} 条，当前 ${await orders.count()} 条`)
+      } catch (err) {
+        output('event-output', `错误：${err.message}`)
+      }
+    }
+  </script>
+</body>
+</html>

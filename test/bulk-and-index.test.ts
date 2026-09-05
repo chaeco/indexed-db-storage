@@ -30,7 +30,10 @@ describe('bulk API', () => {
   })
 
   it('bulkAdd 应返回与输入顺序一致的主键数组', async () => {
-    const keys = await storage.bulkAdd([{ name: 'a', age: 1, city: 'x' }, { name: 'b', age: 2, city: 'y' }])
+    const keys = await storage.bulkAdd([
+      { name: 'a', age: 1, city: 'x' },
+      { name: 'b', age: 2, city: 'y' },
+    ])
 
     expect(keys).toHaveLength(2)
     expect(keys[0]).not.toEqual(keys[1])
@@ -114,7 +117,10 @@ describe('索引驱动查询（where → IDBKeyRange）', () => {
         storeName: 'users',
         keyPath: 'id',
         autoIncrement: true,
-        indexes: [{ name: 'age', keyPath: 'age' }, { name: 'city', keyPath: 'city' }],
+        indexes: [
+          { name: 'age', keyPath: 'age' },
+          { name: 'city', keyPath: 'city' },
+        ],
       }
     )
     await storage.init()
@@ -139,7 +145,9 @@ describe('索引驱动查询（where → IDBKeyRange）', () => {
   })
 
   it('索引字段上的 between 条件应返回区间内记录', async () => {
-    const results = await storage.query({ where: { field: 'age', operator: 'between', value: [25, 35] } })
+    const results = await storage.query({
+      where: { field: 'age', operator: 'between', value: [25, 35] },
+    })
     expect(results.map(r => r.age)).toEqual([25, 30, 35])
   })
 
@@ -306,7 +314,10 @@ describe('边界情况回归', () => {
         storeName: 'users',
         keyPath: 'id',
         autoIncrement: true,
-        indexes: [{ name: 'age', keyPath: 'age' }, { name: 'city', keyPath: 'city' }],
+        indexes: [
+          { name: 'age', keyPath: 'age' },
+          { name: 'city', keyPath: 'city' },
+        ],
       }
     )
     await storage.init()

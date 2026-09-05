@@ -427,15 +427,24 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
     const makeScope = <T2>(storeName: string): ITransactionScope<T2> => ({
       get: key => getData<T2>(db, storeName, key, tx),
       getMany: keys => getManyData<T2>(db, storeName, keys, tx),
-      save: data => saveData(db, storeName, data, tx).then(key => (record(storeName)('add')([key]), key)),
-      update: data => updateData(db, storeName, data, tx).then(key => (record(storeName)('put')([key]), key)),
+      save: data =>
+        saveData(db, storeName, data, tx).then(key => (record(storeName)('add')([key]), key)),
+      update: data =>
+        updateData(db, storeName, data, tx).then(key => (record(storeName)('put')([key]), key)),
       bulkAdd: items =>
-        bulkAddData(db, storeName, items, tx).then(keys => (record(storeName)('bulkAdd')(keys), keys)),
+        bulkAddData(db, storeName, items, tx).then(
+          keys => (record(storeName)('bulkAdd')(keys), keys)
+        ),
       bulkPut: items =>
-        bulkPutData(db, storeName, items, tx).then(keys => (record(storeName)('bulkPut')(keys), keys)),
-      delete: key => deleteData(db, storeName, key, tx).then(() => record(storeName)('delete')([key])),
+        bulkPutData(db, storeName, items, tx).then(
+          keys => (record(storeName)('bulkPut')(keys), keys)
+        ),
+      delete: key =>
+        deleteData(db, storeName, key, tx).then(() => record(storeName)('delete')([key])),
       bulkDelete: keys =>
-        bulkDeleteData(db, storeName, keys, tx).then(n => (record(storeName)('bulkDelete')(keys), n)),
+        bulkDeleteData(db, storeName, keys, tx).then(
+          n => (record(storeName)('bulkDelete')(keys), n)
+        ),
       count: () => getCount(db, storeName, tx),
       query: opts => queryData<T2>(db, storeName, opts, tx),
       forStore: <U>(name: string): ITransactionScope<U> => {
@@ -623,4 +632,5 @@ export class IndexedDBStorage<T = unknown> implements IStorage<T> {
       if (this.db) return
     }
     throw new Error('Database not initialized. Call init() first.')
-  }}
+  }
+}

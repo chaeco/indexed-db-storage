@@ -15,7 +15,11 @@ interface User {
 }
 
 /** 以原生 API 打开指定版本的库并执行升级回调（构造"旧版本"前置状态） */
-function openRaw(dbName: string, version: number, upgrade: (db: IDBDatabase) => void): Promise<void> {
+function openRaw(
+  dbName: string,
+  version: number,
+  upgrade: (db: IDBDatabase) => void
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(dbName, version)
     req.onupgradeneeded = () => upgrade(req.result)

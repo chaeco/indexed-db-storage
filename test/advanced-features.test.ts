@@ -17,7 +17,11 @@ interface User {
 }
 
 /** 以原生 API 打开指定版本的库并执行升级回调（构造"旧版本"前置状态） */
-function openRaw(dbName: string, version: number, upgrade: (db: IDBDatabase) => void): Promise<void> {
+function openRaw(
+  dbName: string,
+  version: number,
+  upgrade: (db: IDBDatabase) => void
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(dbName, version)
     req.onupgradeneeded = () => upgrade(req.result)
@@ -315,9 +319,9 @@ describe('queryKeys', () => {
   })
 
   it('传入 sort 应抛出错误', async () => {
-    await expect(
-      storage.queryKeys({ sort: { field: 'age', order: 'asc' } })
-    ).rejects.toThrow('sort')
+    await expect(storage.queryKeys({ sort: { field: 'age', order: 'asc' } })).rejects.toThrow(
+      'sort'
+    )
   })
 
   it('limit/offset 应生效', async () => {
@@ -368,15 +372,15 @@ describe('keyset 分页（after/before）', () => {
   })
 
   it('与 range 同时提供应抛出错误', async () => {
-    await expect(
-      storage.query({ after: 1, range: IDBKeyRange.lowerBound(0) })
-    ).rejects.toThrow('cannot be combined')
+    await expect(storage.query({ after: 1, range: IDBKeyRange.lowerBound(0) })).rejects.toThrow(
+      'cannot be combined'
+    )
   })
 
   it('after 为非法 IDB key 应抛出错误', async () => {
-    await expect(
-      storage.query({ after: { x: 1 } as unknown as IDBValidKey })
-    ).rejects.toThrow('valid IndexedDB key')
+    await expect(storage.query({ after: { x: 1 } as unknown as IDBValidKey })).rejects.toThrow(
+      'valid IndexedDB key'
+    )
   })
 })
 

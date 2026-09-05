@@ -283,7 +283,9 @@ export function bulkDeleteData(
  * 与显式 range 互斥；after+before 同时提供时为开区间 bound。
  * 抛出错误表示调用方参数非法（range 冲突 / 非法 key）。
  */
-function synthesizeKeysetRange(options: Pick<QueryOptions, 'range' | 'after' | 'before'>): IDBKeyRange | null {
+function synthesizeKeysetRange(
+  options: Pick<QueryOptions, 'range' | 'after' | 'before'>
+): IDBKeyRange | null {
   const { range, after, before } = options
 
   if ((after !== undefined || before !== undefined) && range) {
@@ -294,10 +296,14 @@ function synthesizeKeysetRange(options: Pick<QueryOptions, 'range' | 'after' | '
   if (after === undefined && before === undefined) return range ?? null
 
   if (after !== undefined && !isValidIDBKey(after)) {
-    throw new Error('[IndexedDBStorage] "after" must be a valid IndexedDB key (number/string/Date/array).')
+    throw new Error(
+      '[IndexedDBStorage] "after" must be a valid IndexedDB key (number/string/Date/array).'
+    )
   }
   if (before !== undefined && !isValidIDBKey(before)) {
-    throw new Error('[IndexedDBStorage] "before" must be a valid IndexedDB key (number/string/Date/array).')
+    throw new Error(
+      '[IndexedDBStorage] "before" must be a valid IndexedDB key (number/string/Date/array).'
+    )
   }
 
   if (after !== undefined && before !== undefined) {
@@ -408,7 +414,11 @@ export async function queryData<T>(
       }
     } else {
       // 索引感知排序：单字段排序且字段可用索引时，免全量收集直接拿有序流
-      if (options.sort && !options.direction && tryIndexSortQuery<T>(store, options, resolve, reject)) {
+      if (
+        options.sort &&
+        !options.direction &&
+        tryIndexSortQuery<T>(store, options, resolve, reject)
+      ) {
         return
       }
 
@@ -426,9 +436,7 @@ export async function queryData<T>(
       // 提供 limit 时用 getAll 的 count 参数上界取数，避免大表全量加载
       const offset = Math.max(0, Math.floor(options.offset ?? 0))
       const fetchCount =
-        options.limit !== undefined
-          ? offset + Math.max(0, Math.floor(options.limit))
-          : undefined
+        options.limit !== undefined ? offset + Math.max(0, Math.floor(options.limit)) : undefined
 
       let request: IDBRequest<unknown[]>
       if (effectiveRange !== null && fetchCount !== undefined) {
@@ -593,9 +601,7 @@ function compileRangeCondition(c: CompiledCondition): IDBKeyRange | null {
     case 'gte':
     case 'lt':
     case 'lte':
-      return isValidIDBKey(c.value)
-        ? compileSimpleBound(c.operator, c.value as IDBValidKey)
-        : null
+      return isValidIDBKey(c.value) ? compileSimpleBound(c.operator, c.value as IDBValidKey) : null
     case 'between': {
       if (!Array.isArray(c.value) || c.value.length !== 2) return null
       const [min, max] = c.value as [unknown, unknown]
@@ -635,7 +641,11 @@ function matchesCompiled(item: unknown, conditions: CompiledCondition[]): boolea
 /**
  * 对结果排序（复制后排序，不修改 IDB 原始数组）并应用分页，然后 resolve。
  */
-function finishQuery<T>(results: T[], options: QueryOptions<T>, resolve: (value: T[]) => void): void {
+function finishQuery<T>(
+  results: T[],
+  options: QueryOptions<T>,
+  resolve: (value: T[]) => void
+): void {
   let sorted = results
   if (options.sort) {
     const sorts = Array.isArray(options.sort) ? options.sort : [options.sort]
@@ -880,7 +890,11 @@ export function deleteData(
 /**
  * 清除所有数据
  */
-export function clearAllData(db: IDBDatabase, storeName: string, tx?: IDBTransaction): Promise<void> {
+export function clearAllData(
+  db: IDBDatabase,
+  storeName: string,
+  tx?: IDBTransaction
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const store = resolveStore(db, storeName, 'readwrite', reject, tx)
     resolve(reqToPromise<undefined>(store.clear()).then(() => undefined))
@@ -999,7 +1013,10 @@ export function deleteManyData<T>(
       const cursor = request.result as IDBCursorWithValue | null
       if (cursor) {
         const item = cursor.value as T
-        if (matchesCompiled(item, compiled.conditions) && (!options.filter || options.filter(item))) {
+        if (
+          matchesCompiled(item, compiled.conditions) &&
+          (!options.filter || options.filter(item))
+        ) {
           entries.push({ key: cursor.primaryKey, value: item })
           // 无排序时收集到 offset+limit 即可提前终止
           if (noSort && limit !== undefined && entries.length >= offset + limit) {

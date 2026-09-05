@@ -20,12 +20,21 @@ A universal IndexedDB storage solution providing powerful persistent storage cap
 - ⚙️ **Flexible Configuration & Migrations** - Customize `keyPath`, indexes, and other database settings. New or changed index definitions are applied automatically on the next `init()`, with an `onUpgrade` hook for data migrations. Connections auto-reopen after yielding to cross-tab upgrades (autoOpen).
 - 📦 **Zero Dependencies** - Lightweight design with no external dependencies.
 - 🚀 **Modern API** - Promise-based asynchronous API for seamless integration with `async/await`.
-- ✅ **Well Tested** - 157 test cases with extensive coverage of core logic and edge cases.
+- ✅ **Well Tested** - 172 test cases with extensive coverage of core logic and edge cases.
 
 ## Installation
 
 ```bash
 npm install github:chaeco/indexed-db-storage
+```
+
+## Module Formats
+
+The package ships both **ESM** (`import`) and **CommonJS** (`require`) builds, usable in browsers, bundlers, SSR, and Node.js tooling:
+
+```typescript
+import { IndexedDBStorage } from '@chaeco/indexed-db-storage' // ESM
+const { IndexedDBStorage } = require('@chaeco/indexed-db-storage') // CommonJS
 ```
 
 ## Quick Start

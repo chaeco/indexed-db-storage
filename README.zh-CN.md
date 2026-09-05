@@ -29,12 +29,21 @@
 
 - 🚀 **现代化** - 基于 Promise 的异步 API
 
-- ✅ **测试完善** - 157 个测试用例，全量覆盖核心逻辑和边界情况
+- ✅ **测试完善** - 172 个测试用例，全量覆盖核心逻辑和边界情况
 
 ## 安装
 
 ```bash
 npm install github:chaeco/indexed-db-storage
+```
+
+## 模块格式
+
+同时提供 **ESM**（`import`）与 **CommonJS**（`require`）两种构建产物，适用于浏览器、打包器、服务端渲染（SSR）及 Node.js 工具链：
+
+```typescript
+import { IndexedDBStorage } from '@chaeco/indexed-db-storage' // ESM
+const { IndexedDBStorage } = require('@chaeco/indexed-db-storage') // CommonJS
 ```
 
 ## 快速开始

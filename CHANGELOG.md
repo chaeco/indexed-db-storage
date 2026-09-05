@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-09-05
+
+### Changed
+
+- **Dual ESM/CJS build** — added a CJS bundle (`dist/index.cjs`); `exports.require` and `main` now point to it, so Node `require()` consumers (SSR, CJS toolchains) load native CommonJS instead of failing with `ERR_REQUIRE_ESM`.
+- **True source maps** — build now emits `sourceMap + inlineSources`, so `dist/*.map` embed the original TypeScript source and devtools breakpoints map to real `.ts` lines.
+- **Packaging metadata** — added `sideEffects: false` (safe tree-shaking) and pointed `homepage` at the project site.
+
 ## [0.2.0] - 2026-09-04
 
 ### Added
